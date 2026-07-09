@@ -47,6 +47,8 @@ const numberFormatter = new Intl.NumberFormat('ru-RU', {
   maximumFractionDigits: 2
 })
 
+export const DOOR_INSTALLATION_NOTE = 'Примечание: дверь при монтаже может быть установлена в любом месте камеры.'
+
 function escapeHtml(value: string | number): string {
   return String(value)
     .replaceAll('&', '&amp;')
@@ -153,6 +155,7 @@ function chamberBlock(chamber: ProposalPdfChamber, index: number, total: number,
         <div class="drawing-card side-drawing">
           <h3>3D-вид сбоку · размеры</h3>
           ${side3d}
+          <p class="door-installation-note">${escapeHtml(DOOR_INSTALLATION_NOTE)}</p>
         </div>
         <div class="note">
           <h3>Состав</h3>
@@ -222,6 +225,7 @@ export function buildProposalHtml({
       .drawing-card, .note { border: 1px solid #cfd6dd; padding: 8px; break-inside: avoid; }
       .drawing-card svg, .drawing-card .rendered { display: block; width: 100%; height: auto; object-fit: contain; }
       .side-drawing svg, .side-drawing .rendered { max-height: 300px; }
+      .door-installation-note { margin: 6px 0 0; color: #617083; font-size: 10px; line-height: 1.3; }
       .equipment-photo { margin: 6px 0 0; }
       .equipment-photo img { display: block; width: 100%; max-height: 130px; object-fit: contain; }
       .equipment-photo figcaption { margin-top: 4px; color: #617083; font-size: 10px; }

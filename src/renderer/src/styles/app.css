@@ -670,6 +670,13 @@ input:disabled {
   font-size: 12px;
 }
 
+.result-door-note {
+  margin: -2px 2px -2px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+
 /* ---------- Totals strip ---------- */
 .totals-strip {
   display: grid;

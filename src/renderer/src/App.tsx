@@ -12,7 +12,7 @@ import {
   EstimateExtraRow,
   ProposalOptions
 } from './domain/calculator'
-import { buildProposalHtml, buildVisualsPdfHtml, type ProposalPdfChamber } from './domain/proposal'
+import { DOOR_INSTALLATION_NOTE, buildProposalHtml, buildVisualsPdfHtml, type ProposalPdfChamber } from './domain/proposal'
 import { buildOptimizationReport } from './domain/optimizer'
 import {
   CompanySettings,
@@ -45,6 +45,7 @@ const moneyFormatter = new Intl.NumberFormat('ru-RU', {
   currency: 'RUB'
 })
 const numberFormatter = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 })
+const PROPOSAL_PDF_3D_CAMERA_DISTANCE_FACTOR = 0.92
 
 const formatMoney = (value: number): string => moneyFormatter.format(value)
 const formatNumber = (value: number): string => numberFormatter.format(value)
@@ -388,7 +389,7 @@ export function App(): JSX.Element {
         let side3dImageDataUrl = ''
 
         try {
-          side3dImageDataUrl = renderChamber3DToDataUrl(chamber.input)
+          side3dImageDataUrl = renderChamber3DToDataUrl(chamber.input, 1400, 760, PROPOSAL_PDF_3D_CAMERA_DISTANCE_FACTOR)
         } catch {
           side3dImageDataUrl = ''
         }
@@ -974,6 +975,8 @@ export function App(): JSX.Element {
                 <TopView input={activeChamber} result={activeResult} />
               </div>
             </div>
+
+            <p className="result-door-note">{DOOR_INSTALLATION_NOTE}</p>
 
             <div className="totals-strip">
               <div className="total-chip">

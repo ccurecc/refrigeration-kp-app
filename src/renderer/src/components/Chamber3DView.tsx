@@ -920,7 +920,12 @@ function placeCamera(camera: THREE.PerspectiveCamera, target: THREE.Vector3, mod
   camera.updateProjectionMatrix()
 }
 
-export function renderChamber3DToDataUrl(input: ChamberInput, width = 1400, height = 760): string {
+export function renderChamber3DToDataUrl(
+  input: ChamberInput,
+  width = 1400,
+  height = 760,
+  cameraDistanceFactor = 1.14
+): string {
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(0xeef2f5)
 
@@ -941,7 +946,7 @@ export function renderChamber3DToDataUrl(input: ChamberInput, width = 1400, heig
 
   addSceneLights(scene, maxSideM)
   addGround(scene, maxSideM)
-  placeCamera(camera, target, modelRadiusM, 1.14)
+  placeCamera(camera, target, modelRadiusM, cameraDistanceFactor)
   layoutDimensionLabels(scene, camera, width, height)
   renderer.render(scene, camera)
 
