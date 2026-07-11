@@ -1,4 +1,5 @@
 import { PANEL_WORKING_WIDTH_MM } from './calculator'
+import { buildCenteredDoorSpan, buildPanelRun } from './chamberGeometry'
 
 export type TopShape =
   | { k: 'rect'; x: number; y: number; w: number; h: number; fill?: string; stroke?: string; sw?: number }
@@ -29,8 +30,6 @@ export interface TopViewParams {
   thicknessMm: number
   hasPanelFloor: boolean
   doorWidthMm: number
-  stripCount: number
-  remainderMm: number
 }
 
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max)
@@ -66,7 +65,7 @@ const ARROW = 7
  *   - centre-left   → the chamber itself
  */
 export function buildTopView(params: TopViewParams): TopViewModel {
-  const { longMm, shortMm, thicknessMm, hasPanelFloor, doorWidthMm, stripCount, remainderMm } = params
+  const { longMm, shortMm, thicknessMm, hasPanelFloor, doorWidthMm } = params
 
   const width = 900
   const height = 470
@@ -98,13 +97,11 @@ export function buildTopView(params: TopViewParams): TopViewModel {
   const iw = Math.max(0, ix1 - ix0)
   const ih = Math.max(0, iy1 - iy0)
   const step = PANEL_WORKING_WIDTH_MM * scale
-  const fullStrips = Math.max(0, stripCount - 1)
-  const hasCut = remainderMm > 0 && remainderMm < PANEL_WORKING_WIDTH_MM
+  const ceilingRun = buildPanelRun(longMm)
+  const fullStrips = ceilingRun.fullPanelCount
   const floorLongMm = Math.max(0, longMm - 2 * thicknessMm)
-  const floorStripCount = Math.max(1, Math.ceil(Math.max(floorLongMm, 1) / PANEL_WORKING_WIDTH_MM))
-  const floorFullStrips = Math.max(0, floorStripCount - 1)
-  const floorRemainderMm = Math.round(floorLongMm - floorFullStrips * PANEL_WORKING_WIDTH_MM)
-  const hasFloorCut = hasPanelFloor && floorRemainderMm > 0 && floorRemainderMm < PANEL_WORKING_WIDTH_MM
+  const floorRun = buildPanelRun(floorLongMm)
+  const floorFullStrips = floorRun.fullPanelCount
 
   const shapes: TopShape[] = []
 
@@ -115,15 +112,15 @@ export function buildTopView(params: TopViewParams): TopViewModel {
   // outer chamber size.
   shapes.push({ k: 'rect', x: x0, y: y0, w: cw, h: ch, fill: COLORS.ceiling })
 
-  // Ceiling cut remainder strip.
-  const cutStart = x0 + fullStrips * step
-  if (hasCut && x1 - cutStart > 0.5) {
-    shapes.push({ k: 'rect', x: cutStart, y: y0, w: x1 - cutStart, h: ch, fill: COLORS.cut })
+  // Runs are mirrored horizontally to match the default 3D camera: the far
+  // end of a panel run appears on the left in both views.
+  if (ceilingRun.hasCut) {
+    shapes.push({ k: 'rect', x: x0, y: y0, w: ceilingRun.remainderMm * scale, h: ch, fill: COLORS.cut })
   }
 
   // Ceiling strip seams.
   for (let i = 1; i <= fullStrips; i += 1) {
-    const x = x0 + i * step
+    const x = x1 - i * step
     shapes.push({ k: 'line', x1: x, y1: y0, x2: x, y2: y1, stroke: COLORS.strip, sw: 1.2 })
   }
 
@@ -131,14 +128,13 @@ export function buildTopView(params: TopViewParams): TopViewModel {
   if (hasPanelFloor) {
     shapes.push({ k: 'rect', x: ix0, y: iy0, w: iw, h: ih, fill: COLORS.floor, stroke: COLORS.panelEdge, sw: 0.7 })
 
-    const floorCutStart = ix0 + floorFullStrips * step
-    if (hasFloorCut && ix1 - floorCutStart > 0.5) {
-      shapes.push({ k: 'rect', x: floorCutStart, y: iy0, w: ix1 - floorCutStart, h: ih, fill: COLORS.cut })
+    if (floorRun.hasCut) {
+      shapes.push({ k: 'rect', x: ix0, y: iy0, w: floorRun.remainderMm * scale, h: ih, fill: COLORS.cut })
     }
 
     for (let i = 1; i <= floorFullStrips; i += 1) {
-      const x = ix0 + i * step
-      if (x < ix1) {
+      const x = ix1 - i * step
+      if (x > ix0) {
         shapes.push({ k: 'line', x1: x, y1: iy0, x2: x, y2: iy1, stroke: COLORS.strip, sw: 1 })
       }
     }
@@ -151,35 +147,30 @@ export function buildTopView(params: TopViewParams): TopViewModel {
   const wallOutline = (x: number, y: number, w: number, h: number): void => {
     shapes.push({ k: 'rect', x, y, w, h, fill: 'none', stroke: COLORS.wallStroke, sw: 1 })
   }
-  const panelRun = (
-    spanMm: number
-  ): { fullStrips: number; remainderMm: number; hasCut: boolean; panelCount: number } => {
-    const panelCount = Math.max(1, Math.ceil(Math.max(spanMm, 1) / PANEL_WORKING_WIDTH_MM))
-    const fullStrips = Math.max(0, panelCount - 1)
-    const remainderMm = Math.round(spanMm - fullStrips * PANEL_WORKING_WIDTH_MM)
-
-    return {
-      fullStrips,
-      hasCut: remainderMm > 0 && remainderMm < PANEL_WORKING_WIDTH_MM,
-      panelCount,
-      remainderMm
-    }
-  }
-  const segmentFill = (segmentMm: number): string => (segmentMm < PANEL_WORKING_WIDTH_MM ? COLORS.cut : COLORS.wallFill)
   const drawHorizontalWallPanels = (
     wallRect: { x: number; y: number; w: number; h: number },
     spanMm: number,
     reverse: boolean
   ): void => {
-    const run = panelRun(spanMm)
-    let offset = 0
+    const run = buildPanelRun(spanMm)
 
-    for (let i = 0; i < run.panelCount; i += 1) {
-      const segmentMm = i < run.fullStrips ? PANEL_WORKING_WIDTH_MM : run.remainderMm
-      const segmentW = i === run.panelCount - 1 ? wallRect.w - offset : Math.min(segmentMm * scale, wallRect.w - offset)
+    for (const segment of run.segments) {
+      const offset = segment.offsetMm * scale
+      const segmentW = Math.min(segment.sizeMm * scale, wallRect.w - offset)
       const x = reverse ? wallRect.x + wallRect.w - offset - segmentW : wallRect.x + offset
-      shapes.push({ k: 'rect', x, y: wallRect.y, w: segmentW, h: wallRect.h, fill: segmentFill(segmentMm) })
-      offset += segmentW
+      shapes.push({
+        k: 'rect',
+        x,
+        y: wallRect.y,
+        w: segmentW,
+        h: wallRect.h,
+        fill: segment.isCut ? COLORS.cut : COLORS.wallFill
+      })
+
+      if (segment.offsetMm + segment.sizeMm < spanMm - 1) {
+        const seamX = reverse ? x : x + segmentW
+        shapes.push({ k: 'line', x1: seamX, y1: wallRect.y, x2: seamX, y2: wallRect.y + wallRect.h, stroke: COLORS.wallStroke, sw: 1 })
+      }
     }
   }
   const drawVerticalWallPanels = (
@@ -187,15 +178,25 @@ export function buildTopView(params: TopViewParams): TopViewModel {
     spanMm: number,
     reverse: boolean
   ): void => {
-    const run = panelRun(spanMm)
-    let offset = 0
+    const run = buildPanelRun(spanMm)
 
-    for (let i = 0; i < run.panelCount; i += 1) {
-      const segmentMm = i < run.fullStrips ? PANEL_WORKING_WIDTH_MM : run.remainderMm
-      const segmentH = i === run.panelCount - 1 ? wallRect.h - offset : Math.min(segmentMm * scale, wallRect.h - offset)
+    for (const segment of run.segments) {
+      const offset = segment.offsetMm * scale
+      const segmentH = Math.min(segment.sizeMm * scale, wallRect.h - offset)
       const y = reverse ? wallRect.y + wallRect.h - offset - segmentH : wallRect.y + offset
-      shapes.push({ k: 'rect', x: wallRect.x, y, w: wallRect.w, h: segmentH, fill: segmentFill(segmentMm) })
-      offset += segmentH
+      shapes.push({
+        k: 'rect',
+        x: wallRect.x,
+        y,
+        w: wallRect.w,
+        h: segmentH,
+        fill: segment.isCut ? COLORS.cut : COLORS.wallFill
+      })
+
+      if (segment.offsetMm + segment.sizeMm < spanMm - 1) {
+        const seamY = reverse ? y : y + segmentH
+        shapes.push({ k: 'line', x1: wallRect.x, y1: seamY, x2: wallRect.x + wallRect.w, y2: seamY, stroke: COLORS.wallStroke, sw: 1 })
+      }
     }
   }
   const topWall = { x: x0, y: y0, w: cw, h: tw }
@@ -205,64 +206,18 @@ export function buildTopView(params: TopViewParams): TopViewModel {
 
   const longWallSpanMm = longMm
   const shortWallSpanMm = Math.max(0, shortMm - 2 * thicknessMm)
-  const longWallRun = panelRun(longWallSpanMm)
-  const shortWallRun = panelRun(shortWallSpanMm)
-  const longWallFullStrips = longWallRun.fullStrips
-  const shortWallFullStrips = shortWallRun.fullStrips
-  const longWallHasCut = longWallRun.hasCut
-  const shortWallHasCut = shortWallRun.hasCut
+  const longWallRun = buildPanelRun(longWallSpanMm)
+  const shortWallRun = buildPanelRun(shortWallSpanMm)
 
-  drawHorizontalWallPanels(topWall, longWallSpanMm, false)
-  drawVerticalWallPanels(rightWall, shortWallSpanMm, false)
-  drawHorizontalWallPanels(bottomWall, longWallSpanMm, false)
-  drawVerticalWallPanels(leftWall, shortWallSpanMm, false)
+  drawHorizontalWallPanels(topWall, longWallSpanMm, true)
+  drawVerticalWallPanels(rightWall, shortWallSpanMm, true)
+  drawHorizontalWallPanels(bottomWall, longWallSpanMm, true)
+  drawVerticalWallPanels(leftWall, shortWallSpanMm, true)
 
   wallOutline(topWall.x, topWall.y, topWall.w, topWall.h)
   wallOutline(rightWall.x, rightWall.y, rightWall.w, rightWall.h)
   wallOutline(bottomWall.x, bottomWall.y, bottomWall.w, bottomWall.h)
   wallOutline(leftWall.x, leftWall.y, leftWall.w, leftWall.h)
-
-  // Wall panel seams follow the actual wall spans: long walls are full length,
-  // short end walls are inside between them.
-  const longWallStep = PANEL_WORKING_WIDTH_MM * scale
-  const shortWallStep = PANEL_WORKING_WIDTH_MM * scale
-  for (let i = 1; i <= longWallFullStrips; i += 1) {
-    const topX = topWall.x + i * longWallStep
-    const bottomX = bottomWall.x + i * longWallStep
-    if (topX < topWall.x + topWall.w) {
-      shapes.push({ k: 'line', x1: topX, y1: topWall.y, x2: topX, y2: topWall.y + topWall.h, stroke: COLORS.wallStroke, sw: 1 })
-    }
-    if (bottomX < bottomWall.x + bottomWall.w) {
-      shapes.push({
-        k: 'line',
-        x1: bottomX,
-        y1: bottomWall.y,
-        x2: bottomX,
-        y2: bottomWall.y + bottomWall.h,
-        stroke: COLORS.wallStroke,
-        sw: 1
-      })
-    }
-  }
-
-  for (let i = 1; i <= shortWallFullStrips; i += 1) {
-    const rightY = rightWall.y + i * shortWallStep
-    const leftY = leftWall.y + i * shortWallStep
-    if (rightY < rightWall.y + rightWall.h) {
-      shapes.push({
-        k: 'line',
-        x1: rightWall.x,
-        y1: rightY,
-        x2: rightWall.x + rightWall.w,
-        y2: rightY,
-        stroke: COLORS.wallStroke,
-        sw: 1
-      })
-    }
-    if (leftY < leftWall.y + leftWall.h) {
-      shapes.push({ k: 'line', x1: leftWall.x, y1: leftY, x2: leftWall.x + leftWall.w, y2: leftY, stroke: COLORS.wallStroke, sw: 1 })
-    }
-  }
 
   // Internal 40×40 angles.
   const ia = Math.max(1, Math.min(40 * scale, tw * 0.72))
@@ -288,11 +243,9 @@ export function buildTopView(params: TopViewParams): TopViewModel {
   extAngle(x1, y1, -1, -1)
 
   // Door opening + channel on the front wall.
-  const doorW = clamp(doorWidthMm * scale, 20, Math.max(20, Math.min(bottomWall.w * 0.5, bottomWall.w - 2 * el)))
-  const doorMinX = bottomWall.x + el
-  const doorMaxX = bottomWall.x + bottomWall.w - doorW - el
-  const preferredDoorX = bottomWall.x + bottomWall.w / 2 - doorW / 2
-  const dx = doorMaxX >= doorMinX ? clamp(preferredDoorX, doorMinX, doorMaxX) : bottomWall.x + (bottomWall.w - doorW) / 2
+  const door = buildCenteredDoorSpan(longMm, doorWidthMm)
+  const doorW = door.widthMm * scale
+  const dx = bottomWall.x + door.leftMm * scale
   shapes.push({ k: 'rect', x: dx, y: bottomWall.y, w: doorW, h: bottomWall.h, fill: COLORS.door, stroke: COLORS.wallStroke, sw: 1 })
   shapes.push({ k: 'rect', x: dx - el, y: bottomWall.y, w: el, h: bottomWall.h, fill: COLORS.channel })
   shapes.push({ k: 'rect', x: dx + doorW, y: bottomWall.y, w: el, h: bottomWall.h, fill: COLORS.channel })
@@ -330,7 +283,7 @@ export function buildTopView(params: TopViewParams): TopViewModel {
     k: 'text',
     x: padLeft,
     y: 28,
-    text: `Потолок на стенах: ${longMm}×${shortMm} мм, ${stripCount} шт`,
+    text: `Потолок на стенах: ${longMm}×${shortMm} мм, ${ceilingRun.panelCount} шт`,
     anchor: 'start',
     size: 14.5,
     weight: 700,
@@ -347,7 +300,7 @@ export function buildTopView(params: TopViewParams): TopViewModel {
     { color: COLORS.door, label: 'Дверной проём (швеллер)' },
     { color: hasPanelFloor ? COLORS.floor : COLORS.roomFloor, label: hasPanelFloor ? 'Пол между стенами' : 'Пол помещения' }
   ]
-  if (hasCut || hasFloorCut || longWallHasCut || shortWallHasCut) {
+  if (ceilingRun.hasCut || (hasPanelFloor && floorRun.hasCut) || longWallRun.hasCut || shortWallRun.hasCut) {
     legendItems.push({ color: COLORS.cut, label: 'Подрезка панели' })
   }
   legendItems.push({ color: COLORS.wallFill, label: 'Длинные стены поверх торцевых' })

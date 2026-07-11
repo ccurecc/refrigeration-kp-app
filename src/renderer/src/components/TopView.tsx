@@ -82,9 +82,7 @@ export function TopView({ input, result }: TopViewProps): JSX.Element {
     shortMm: result.shortSideMm,
     thicknessMm: input.thicknessMm,
     hasPanelFloor: input.hasPanelFloor,
-    doorWidthMm: input.doorWidthMm,
-    stripCount: result.ceilingStripCount,
-    remainderMm: result.ceilingRemainderMm
+    doorWidthMm: input.doorWidthMm
   })
 
   const svgRef = useRef<SVGSVGElement | null>(null)

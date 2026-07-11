@@ -21,6 +21,7 @@ export interface CustomerData {
 export interface ProposalSettings {
   number: string
   validUntil: string
+  note: string
 }
 
 export interface CatalogSettings {
@@ -73,7 +74,8 @@ export const defaultCustomerData: CustomerData = {
 
 export const defaultProposalSettings: ProposalSettings = {
   number: 'КП 001',
-  validUntil: ''
+  validUntil: '',
+  note: ''
 }
 
 export const defaultCatalogSettings: CatalogSettings = {

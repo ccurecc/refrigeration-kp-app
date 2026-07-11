@@ -34,7 +34,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -348,7 +349,8 @@ label {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   min-height: 38px;
   border: 1px solid #cdd5dd;
@@ -361,12 +363,14 @@ select {
 }
 
 input:hover:not(:disabled),
-select:hover:not(:disabled) {
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
   border-color: #b4bec8;
 }
 
 input:focus,
 select:focus,
+textarea:focus,
 button:focus-visible {
   outline: none;
   border-color: var(--green);
@@ -376,6 +380,13 @@ button:focus-visible {
 input:disabled {
   background: #f2f4f6;
   color: #9aa3ad;
+}
+
+.proposal-note-input {
+  min-height: 104px;
+  padding: 10px 11px;
+  line-height: 1.45;
+  resize: vertical;
 }
 
 .inline-fields {

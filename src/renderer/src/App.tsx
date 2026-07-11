@@ -921,6 +921,15 @@ export function App(): JSX.Element {
             )}
           </FormCard>
 
+          <FormCard title="Примечание">
+            <textarea
+              className="proposal-note-input"
+              placeholder="Введите примечание, которое будет добавлено в конец КП"
+              value={proposal.note}
+              onChange={(event) => updateProposal('note', event.target.value)}
+            />
+          </FormCard>
+
           <FormCard title="Вид КП">
             <div className="segmented-control" role="group" aria-label="Режим коммерческого предложения">
               <button

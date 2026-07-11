@@ -1,4 +1,5 @@
 import type { ChamberInput, ChamberResult } from './calculator'
+import { buildCenteredDoorSpan } from './chamberGeometry'
 
 interface Point {
   x: number
@@ -47,15 +48,15 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
   const oy = 354
 
   const p = (x: number, y: number, z: number): Point => ({
-    x: ox + (x + z * depthX) * scale,
+    x: ox + (longMm - x + z * depthX) * scale,
     y: oy - (y + z * depthY) * scale
   })
 
-  const doorWidthMm = Math.min(input.doorWidthMm, longMm * 0.72)
+  const doorSpan = buildCenteredDoorSpan(longMm, input.doorWidthMm)
+  const doorWidthMm = doorSpan.widthMm
   const doorHeightMm = Math.min(input.doorHeightMm, wallHeightMm)
-  const doorCenterMm = longMm * 0.68
-  const doorLeftMm = Math.max(thicknessMm, Math.min(longMm - thicknessMm - doorWidthMm, doorCenterMm - doorWidthMm / 2))
-  const doorRightMm = doorLeftMm + doorWidthMm
+  const doorLeftMm = doorSpan.leftMm
+  const doorRightMm = doorSpan.rightMm
   const frontWall = [p(0, 0, 0), p(longMm, 0, 0), p(longMm, wallHeightMm, 0), p(0, wallHeightMm, 0)]
   const rightWall = [p(longMm, 0, 0), p(longMm, 0, shortMm), p(longMm, wallHeightMm, shortMm), p(longMm, wallHeightMm, 0)]
   const backWall = [p(0, 0, shortMm), p(longMm, 0, shortMm), p(longMm, wallHeightMm, shortMm), p(0, wallHeightMm, shortMm)]

@@ -3,12 +3,15 @@ import { Maximize2, Minimize2, RotateCcw } from 'lucide-react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { PANEL_WORKING_WIDTH_MM, type ChamberInput } from '@renderer/domain/calculator'
+import { buildCenteredDoorSpan, buildPanelRun } from '@renderer/domain/chamberGeometry'
 
 interface Chamber3DViewProps {
   input: ChamberInput
 }
 
 interface ModelMetrics {
+  lengthMm: number
+  widthMm: number
   lengthM: number
   widthM: number
   floorLengthM: number
@@ -32,6 +35,8 @@ const MIN_MODEL_SIDE_M = 0.25
 const SEAM_WIDTH_M = 0.018
 const SEAM_FACE_DEPTH_M = 0.012
 const SEAM_FACE_OFFSET_M = 0.002
+const CAMERA_FOV_DEG = 26
+const CAMERA_DISTANCE_FACTOR = 1.42
 
 function mmToM(value: number): number {
   return Math.max(value / 1000, MIN_MODEL_SIDE_M)
@@ -59,8 +64,6 @@ function addBox(
   const geometry = new THREE.BoxGeometry(size.x, size.y, size.z)
   const mesh = new THREE.Mesh(geometry, material)
   mesh.position.copy(position)
-  mesh.castShadow = true
-  mesh.receiveShadow = true
   group.add(mesh)
 
   if (edgeMaterial) {
@@ -127,7 +130,7 @@ function isDimensionSprite(object: THREE.Object3D): object is DimensionSprite {
 
 function worldToScreen(
   worldPosition: THREE.Vector3,
-  camera: THREE.PerspectiveCamera,
+  camera: THREE.Camera,
   viewportWidth: number,
   viewportHeight: number
 ): { x: number; y: number; z: number } {
@@ -161,7 +164,7 @@ function getReadableScreenAngle(start: { x: number; y: number }, end: { x: numbe
 
 function alignDimensionLabels(
   root: THREE.Object3D,
-  camera: THREE.PerspectiveCamera,
+  camera: THREE.Camera,
   viewportWidth: number,
   viewportHeight: number
 ): void {
@@ -198,7 +201,7 @@ function alignDimensionLabels(
 
 function layoutDimensionLabels(
   root: THREE.Object3D,
-  camera: THREE.PerspectiveCamera,
+  camera: THREE.Camera,
   viewportWidth: number,
   viewportHeight: number
 ): void {
@@ -310,29 +313,11 @@ function addInteriorPanelSeams(
 }
 
 function wallPanelSegments(spanM: number): Array<{ offsetM: number; sizeM: number; isCut: boolean }> {
-  const stepM = PANEL_WORKING_WIDTH_MM / 1000
-  const panelCount = Math.max(1, Math.ceil(Math.max(spanM, 0.001) / stepM))
-  const fullPanels = Math.max(0, panelCount - 1)
-  const remainderM = spanM - fullPanels * stepM
-  const segments: Array<{ offsetM: number; sizeM: number; isCut: boolean }> = []
-  let offsetM = 0
-
-  for (let index = 0; index < panelCount; index += 1) {
-    const isLast = index === panelCount - 1
-    const sizeM = isLast ? Math.max(spanM - offsetM, 0) : Math.min(stepM, Math.max(spanM - offsetM, 0))
-
-    if (sizeM > 0.001) {
-      segments.push({
-        isCut: isLast && remainderM > 0.001 && remainderM < stepM - 0.001,
-        offsetM,
-        sizeM
-      })
-    }
-
-    offsetM += sizeM
-  }
-
-  return segments
+  return buildPanelRun(spanM * 1000).segments.map((segment) => ({
+    isCut: segment.isCut,
+    offsetM: segment.offsetMm / 1000,
+    sizeM: segment.sizeMm / 1000
+  }))
 }
 
 function addWallPanels(
@@ -470,9 +455,6 @@ function addDeckSeams(
   const seamFaceOffsetM = SEAM_FACE_DEPTH_M / 2 + SEAM_FACE_OFFSET_M
   const ceilingY = metrics.totalHeightM + 0.008
   const floorY = thicknessM + 0.008
-  const wideSideM = Math.max(metrics.lengthM, metrics.widthM)
-  const ceilingRemainderM = wideSideM % panelStepM
-  const hasCeilingCutStrip = ceilingRemainderM > 0.04 && panelStepM - ceilingRemainderM > 0.04
 
   const addXDeckSeamOnFaces = (x: number, yMin: number, yMax: number, widthM: number): void => {
     const centerY = (yMin + yMax) / 2
@@ -499,61 +481,77 @@ function addDeckSeams(
   }
 
   if (metrics.lengthM >= metrics.widthM) {
+    const ceilingRun = buildPanelRun(metrics.lengthM * 1000)
+
     for (let x = -metrics.lengthM / 2 + panelStepM; x < metrics.lengthM / 2; x += panelStepM) {
       addXDeckSeamOnFaces(x, metrics.wallHeightM, metrics.totalHeightM, metrics.widthM)
     }
 
-    if (hasCeilingCutStrip) {
-      const cutCenterX = metrics.lengthM / 2 - ceilingRemainderM / 2
-      const cutSize = new THREE.Vector3(ceilingRemainderM, 0.014, metrics.widthM)
-      addBox(group, cutSize, new THREE.Vector3(cutCenterX, ceilingY + 0.002, 0), cutMaterial)
+    if (ceilingRun.hasCut) {
+      const cutSizeM = ceilingRun.remainderMm / 1000
+      const cutCenterX = metrics.lengthM / 2 - cutSizeM / 2
+      addBox(
+        group,
+        new THREE.Vector3(cutSizeM, 0.014, metrics.widthM),
+        new THREE.Vector3(cutCenterX, ceilingY + 0.002, 0),
+        cutMaterial
+      )
     }
 
     if (!hasPanelFloor) {
       return
     }
 
-    const floorRemainderM = metrics.floorLengthM % panelStepM
-    const hasFloorCutStrip = floorRemainderM > 0.04 && panelStepM - floorRemainderM > 0.04
+    const floorRun = buildPanelRun(metrics.floorLengthM * 1000)
 
     for (let x = -metrics.floorLengthM / 2 + panelStepM; x < metrics.floorLengthM / 2; x += panelStepM) {
       addXDeckSeamOnFaces(x, 0, thicknessM, metrics.floorWidthM)
     }
 
-    if (hasFloorCutStrip) {
-      const cutCenterX = metrics.floorLengthM / 2 - floorRemainderM / 2
-      const cutSize = new THREE.Vector3(floorRemainderM, 0.014, metrics.floorWidthM)
+    if (floorRun.hasCut) {
+      const cutSizeM = floorRun.remainderMm / 1000
+      const cutCenterX = metrics.floorLengthM / 2 - cutSizeM / 2
+      const cutSize = new THREE.Vector3(cutSizeM, 0.014, metrics.floorWidthM)
       addBox(group, cutSize, new THREE.Vector3(cutCenterX, floorY + 0.002, 0), cutMaterial)
       addBox(group, cutSize, new THREE.Vector3(cutCenterX, -0.01, 0), cutMaterial)
     }
+
   } else {
+    const ceilingRun = buildPanelRun(metrics.widthM * 1000)
+
     for (let z = -metrics.widthM / 2 + panelStepM; z < metrics.widthM / 2; z += panelStepM) {
       addZDeckSeamOnFaces(z, metrics.wallHeightM, metrics.totalHeightM, metrics.lengthM)
     }
 
-    if (hasCeilingCutStrip) {
-      const cutCenterZ = metrics.widthM / 2 - ceilingRemainderM / 2
-      const cutSize = new THREE.Vector3(metrics.lengthM, 0.014, ceilingRemainderM)
-      addBox(group, cutSize, new THREE.Vector3(0, ceilingY + 0.002, cutCenterZ), cutMaterial)
+    if (ceilingRun.hasCut) {
+      const cutSizeM = ceilingRun.remainderMm / 1000
+      const cutCenterZ = metrics.widthM / 2 - cutSizeM / 2
+      addBox(
+        group,
+        new THREE.Vector3(metrics.lengthM, 0.014, cutSizeM),
+        new THREE.Vector3(0, ceilingY + 0.002, cutCenterZ),
+        cutMaterial
+      )
     }
 
     if (!hasPanelFloor) {
       return
     }
 
-    const floorRemainderM = metrics.floorWidthM % panelStepM
-    const hasFloorCutStrip = floorRemainderM > 0.04 && panelStepM - floorRemainderM > 0.04
+    const floorRun = buildPanelRun(metrics.floorWidthM * 1000)
 
     for (let z = -metrics.floorWidthM / 2 + panelStepM; z < metrics.floorWidthM / 2; z += panelStepM) {
       addZDeckSeamOnFaces(z, 0, thicknessM, metrics.floorLengthM)
     }
 
-    if (hasFloorCutStrip) {
-      const cutCenterZ = metrics.floorWidthM / 2 - floorRemainderM / 2
-      const cutSize = new THREE.Vector3(metrics.floorLengthM, 0.014, floorRemainderM)
+    if (floorRun.hasCut) {
+      const cutSizeM = floorRun.remainderMm / 1000
+      const cutCenterZ = metrics.floorWidthM / 2 - cutSizeM / 2
+      const cutSize = new THREE.Vector3(metrics.floorLengthM, 0.014, cutSizeM)
       addBox(group, cutSize, new THREE.Vector3(0, floorY + 0.002, cutCenterZ), cutMaterial)
       addBox(group, cutSize, new THREE.Vector3(0, -0.01, cutCenterZ), cutMaterial)
     }
+
   }
 }
 
@@ -603,15 +601,11 @@ function addDoor(
   glassMaterial: THREE.Material,
   handleMaterial: THREE.Material
 ): void {
-  const marginM = Math.min(0.45, metrics.lengthM * 0.08)
-  const maxDoorWidthM = Math.max(0.2, metrics.lengthM - marginM * 2)
+  const doorSpan = buildCenteredDoorSpan(metrics.lengthMm, input.doorWidthMm)
   const maxDoorHeightM = Math.max(0.2, metrics.wallHeightM - 0.08)
-  const doorWidthM = clamp(input.doorWidthMm / 1000, 0.25, maxDoorWidthM)
+  const doorWidthM = doorSpan.widthMm / 1000
   const doorHeightM = clamp(input.doorHeightMm / 1000, 0.3, maxDoorHeightM)
-  const minCenterX = -metrics.lengthM / 2 + doorWidthM / 2 + marginM
-  const maxCenterX = metrics.lengthM / 2 - doorWidthM / 2 - marginM
-  const preferredCenterX = metrics.lengthM * 0.18
-  const doorCenterX = minCenterX <= maxCenterX ? clamp(preferredCenterX, minCenterX, maxCenterX) : 0
+  const doorCenterX = doorSpan.centerMm / 1000 - metrics.lengthM / 2
   const doorBottomY = 0
   const doorCenterY = doorBottomY + doorHeightM / 2
   const frontSurfaceZ = -metrics.widthM / 2 - 0.048
@@ -663,7 +657,6 @@ function addDoor(
   const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.09, 24), handleMaterial)
   handle.rotation.x = Math.PI / 2
   handle.position.set(doorCenterX + doorWidthM * 0.34, doorBottomY + doorHeightM * 0.52, frontSurfaceZ - 0.08)
-  handle.castShadow = true
   group.add(handle)
 }
 
@@ -759,7 +752,7 @@ function addDimensions(
     new THREE.Vector3(-metrics.lengthM / 2, y, frontZ),
     new THREE.Vector3(metrics.lengthM / 2, y, frontZ),
     new THREE.Vector3(0, 0, tick),
-    formatMm(input.lengthMm),
+    formatMm(metrics.lengthMm),
     material
   )
 
@@ -768,7 +761,7 @@ function addDimensions(
     new THREE.Vector3(rightX, y, -metrics.widthM / 2),
     new THREE.Vector3(rightX, y, metrics.widthM / 2),
     new THREE.Vector3(tick, 0, 0),
-    formatMm(input.widthMm),
+    formatMm(metrics.widthMm),
     material
   )
 
@@ -781,16 +774,10 @@ function addDimensions(
     material
   )
 
-  const doorMarginM = Math.min(0.45, metrics.lengthM * 0.08)
-  const doorWidthM = clamp(
-    input.doorWidthMm / 1000,
-    0.25,
-    Math.max(0.25, metrics.lengthM - doorMarginM * 2)
-  )
+  const doorSpan = buildCenteredDoorSpan(metrics.lengthMm, input.doorWidthMm)
+  const doorWidthM = doorSpan.widthMm / 1000
   const doorHeightM = clamp(input.doorHeightMm / 1000, 0.3, Math.max(0.3, metrics.wallHeightM - 0.08))
-  const minDoorCenterX = -metrics.lengthM / 2 + doorWidthM / 2 + doorMarginM
-  const maxDoorCenterX = metrics.lengthM / 2 - doorWidthM / 2 - doorMarginM
-  const doorCenterX = minDoorCenterX <= maxDoorCenterX ? clamp(metrics.lengthM * 0.18, minDoorCenterX, maxDoorCenterX) : 0
+  const doorCenterX = doorSpan.centerMm / 1000 - metrics.lengthM / 2
   const doorLeftX = doorCenterX - doorWidthM / 2
   const doorRightX = doorCenterX + doorWidthM / 2
   const doorDimZ = -metrics.widthM / 2 - thicknessM - 0.26
@@ -818,14 +805,16 @@ function addDimensions(
 
 function createChamberModel(input: ChamberInput): { group: THREE.Group; metrics: ModelMetrics } {
   const group = new THREE.Group()
-  const lengthM = mmToM(input.lengthMm)
-  const widthM = mmToM(input.widthMm)
+  const lengthMm = Math.max(input.lengthMm, input.widthMm)
+  const widthMm = Math.min(input.lengthMm, input.widthMm)
+  const lengthM = mmToM(lengthMm)
+  const widthM = mmToM(widthMm)
   const thicknessM = clamp(input.thicknessMm / 1000, 0.04, 0.18)
   const wallHeightM = mmToM(Math.max(input.heightMm - input.thicknessMm, input.thicknessMm))
   const totalHeightM = wallHeightM + thicknessM
   const floorLengthM = Math.max(lengthM - 2 * thicknessM, MIN_MODEL_SIDE_M)
   const floorWidthM = Math.max(widthM - 2 * thicknessM, MIN_MODEL_SIDE_M)
-  const metrics = { lengthM, widthM, floorLengthM, floorWidthM, wallHeightM, totalHeightM }
+  const metrics = { lengthMm, widthMm, lengthM, widthM, floorLengthM, floorWidthM, wallHeightM, totalHeightM }
 
   const panelMaterial = new THREE.MeshStandardMaterial({
     color: 0xfafafa,
@@ -888,8 +877,6 @@ function addSceneLights(scene: THREE.Scene, maxSideM: number): void {
 
   const keyLight = new THREE.DirectionalLight(0xffffff, 3.4)
   keyLight.position.set(maxSideM * 0.8, maxSideM * 1.4, -maxSideM * 0.8)
-  keyLight.castShadow = true
-  keyLight.shadow.mapSize.set(2048, 2048)
   scene.add(keyLight)
 
   const fillLight = new THREE.DirectionalLight(0xcfe9ff, 1.1)
@@ -898,23 +885,27 @@ function addSceneLights(scene: THREE.Scene, maxSideM: number): void {
 }
 
 function addGround(scene: THREE.Scene, maxSideM: number): void {
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(maxSideM * 2.4, maxSideM * 2.4),
-    new THREE.ShadowMaterial({ color: 0x77818b, opacity: 0.16 })
-  )
-  ground.rotation.x = -Math.PI / 2
-  ground.position.y = -0.018
-  ground.receiveShadow = true
-  scene.add(ground)
-
   const grid = new THREE.GridHelper(maxSideM * 2.4, 12, 0xb7c1ca, 0xd2d9df)
   grid.position.y = -0.012
   scene.add(grid)
 }
 
-function placeCamera(camera: THREE.PerspectiveCamera, target: THREE.Vector3, modelRadiusM: number, distanceFactor = 1.42): void {
-  const distance = Math.max(modelRadiusM / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * distanceFactor, 3.5)
-  const direction = new THREE.Vector3(0.78, 0.52, -1).normalize()
+function configurePerspectiveCamera(camera: THREE.PerspectiveCamera, viewportWidth: number, viewportHeight: number): void {
+  camera.aspect = Math.max(viewportWidth, 1) / Math.max(viewportHeight, 1)
+  camera.updateProjectionMatrix()
+}
+
+function placeCamera(
+  camera: THREE.PerspectiveCamera,
+  target: THREE.Vector3,
+  modelRadiusM: number,
+  distanceFactor = CAMERA_DISTANCE_FACTOR
+): void {
+  const verticalFov = THREE.MathUtils.degToRad(camera.fov)
+  const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect)
+  const limitingHalfFov = Math.min(verticalFov, horizontalFov) / 2
+  const distance = Math.max((modelRadiusM / Math.sin(limitingHalfFov)) * distanceFactor, 3.5)
+  const direction = new THREE.Vector3(0.42, 0.5, -1).normalize()
   camera.position.copy(target).add(direction.multiplyScalar(distance))
   camera.lookAt(target)
   camera.updateProjectionMatrix()
@@ -935,17 +926,16 @@ export function renderChamber3DToDataUrl(
   const maxSideM = Math.max(metrics.lengthM, metrics.widthM, metrics.totalHeightM)
   const modelRadiusM = Math.sqrt(metrics.lengthM ** 2 + metrics.widthM ** 2 + metrics.totalHeightM ** 2) / 2
   const target = new THREE.Vector3(0, metrics.totalHeightM * 0.48, 0)
-  const camera = new THREE.PerspectiveCamera(34, width / height, 0.03, Math.max(80, maxSideM * 12))
+  const camera = new THREE.PerspectiveCamera(CAMERA_FOV_DEG, width / height, 0.03, Math.max(80, maxSideM * 12))
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true })
 
   renderer.setPixelRatio(1)
-  renderer.shadowMap.enabled = true
-  renderer.shadowMap.type = THREE.PCFShadowMap
   renderer.outputColorSpace = THREE.SRGBColorSpace
   renderer.setSize(width, height, false)
 
   addSceneLights(scene, maxSideM)
   addGround(scene, maxSideM)
+  configurePerspectiveCamera(camera, width, height)
   placeCamera(camera, target, modelRadiusM, cameraDistanceFactor)
   layoutDimensionLabels(scene, camera, width, height)
   renderer.render(scene, camera)
@@ -1035,13 +1025,11 @@ export function Chamber3DView({ input }: Chamber3DViewProps): JSX.Element {
     const target = new THREE.Vector3(0, metrics.totalHeightM * 0.48, 0)
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true })
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
-    renderer.shadowMap.enabled = true
-    renderer.shadowMap.type = THREE.PCFShadowMap
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.domElement.className = 'chamber-3d-canvas'
     container.replaceChildren(renderer.domElement)
 
-    const camera = new THREE.PerspectiveCamera(34, 1, 0.03, Math.max(80, maxSideM * 12))
+    const camera = new THREE.PerspectiveCamera(CAMERA_FOV_DEG, 1, 0.03, Math.max(80, maxSideM * 12))
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
     controls.dampingFactor = 0.08
@@ -1051,11 +1039,8 @@ export function Chamber3DView({ input }: Chamber3DViewProps): JSX.Element {
     controls.minPolarAngle = Math.PI * 0.04
     controls.target.copy(target)
 
-    const placeCamera = (): void => {
-      const distance = Math.max(modelRadiusM / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.42, 3.5)
-      const direction = new THREE.Vector3(0.78, 0.52, -1).normalize()
-      camera.position.copy(target).add(direction.multiplyScalar(distance))
-      camera.lookAt(target)
+    const resetCamera = (): void => {
+      placeCamera(camera, target, modelRadiusM, CAMERA_DISTANCE_FACTOR)
       controls.target.copy(target)
       controls.update()
     }
@@ -1065,22 +1050,11 @@ export function Chamber3DView({ input }: Chamber3DViewProps): JSX.Element {
 
     const keyLight = new THREE.DirectionalLight(0xffffff, 3.4)
     keyLight.position.set(maxSideM * 0.8, maxSideM * 1.4, -maxSideM * 0.8)
-    keyLight.castShadow = true
-    keyLight.shadow.mapSize.set(2048, 2048)
     scene.add(keyLight)
 
     const fillLight = new THREE.DirectionalLight(0xcfe9ff, 1.1)
     fillLight.position.set(-maxSideM, maxSideM * 0.55, maxSideM)
     scene.add(fillLight)
-
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(maxSideM * 2.4, maxSideM * 2.4),
-      new THREE.ShadowMaterial({ color: 0x77818b, opacity: 0.16 })
-    )
-    ground.rotation.x = -Math.PI / 2
-    ground.position.y = -0.018
-    ground.receiveShadow = true
-    scene.add(ground)
 
     const grid = new THREE.GridHelper(maxSideM * 2.4, 12, 0xb7c1ca, 0xd2d9df)
     grid.position.y = -0.012
@@ -1090,16 +1064,15 @@ export function Chamber3DView({ input }: Chamber3DViewProps): JSX.Element {
       const width = Math.max(container.clientWidth, 320)
       const height = Math.max(container.clientHeight, 260)
       renderer.setSize(width, height, false)
-      camera.aspect = width / height
-      camera.updateProjectionMatrix()
+      configurePerspectiveCamera(camera, width, height)
     }
 
     const resizeObserver = new ResizeObserver(resize)
     resizeObserver.observe(container)
     resize()
-    placeCamera()
+    resetCamera()
     controls.saveState()
-    resetCameraRef.current = placeCamera
+    resetCameraRef.current = resetCamera
 
     let frameId = window.requestAnimationFrame(function render() {
       controls.update()
