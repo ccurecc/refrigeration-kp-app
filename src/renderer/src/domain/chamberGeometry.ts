@@ -23,6 +23,14 @@ export interface CenteredDoorSpan {
   widthMm: number
 }
 
+export interface ChamberPanelRuns {
+  floor: PanelRun | null
+  floorSpanMm: number
+  longWall: PanelRun
+  shortWall: PanelRun
+  shortWallSpanMm: number
+}
+
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max)
 
 export function buildPanelRun(spanMm: number): PanelRun {
@@ -47,6 +55,24 @@ export function buildPanelRun(spanMm: number): PanelRun {
   }
 
   return { panelCount, fullPanelCount, remainderMm, hasCut, segments }
+}
+
+export function buildChamberPanelRuns(
+  longMm: number,
+  shortMm: number,
+  thicknessMm: number,
+  hasPanelFloor: boolean
+): ChamberPanelRuns {
+  const floorSpanMm = Math.max(0, longMm - 2 * thicknessMm)
+  const shortWallSpanMm = Math.max(0, shortMm - 2 * thicknessMm)
+
+  return {
+    floor: hasPanelFloor ? buildPanelRun(floorSpanMm) : null,
+    floorSpanMm,
+    longWall: buildPanelRun(longMm),
+    shortWall: buildPanelRun(shortWallSpanMm),
+    shortWallSpanMm
+  }
 }
 
 export function buildCenteredDoorSpan(wallSpanMm: number, requestedWidthMm: number): CenteredDoorSpan {

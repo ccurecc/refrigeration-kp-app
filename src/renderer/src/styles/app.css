@@ -953,6 +953,7 @@ tbody tr:last-child td {
 }
 
 .chamber-3d-view {
+  position: relative;
   width: 100%;
   height: 100%;
 }
@@ -967,6 +968,15 @@ tbody tr:last-child td {
 
 .chamber-3d-canvas:active {
   cursor: grabbing;
+}
+
+.chamber-3d-annotations {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
 .view-floating-controls {

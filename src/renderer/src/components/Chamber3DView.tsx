@@ -3,7 +3,7 @@ import { Maximize2, Minimize2, RotateCcw } from 'lucide-react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { PANEL_WORKING_WIDTH_MM, type ChamberInput } from '@renderer/domain/calculator'
-import { buildCenteredDoorSpan, buildPanelRun } from '@renderer/domain/chamberGeometry'
+import { buildCenteredDoorSpan, buildChamberPanelRuns, buildPanelRun } from '@renderer/domain/chamberGeometry'
 
 interface Chamber3DViewProps {
   input: ChamberInput
@@ -21,8 +21,19 @@ interface ModelMetrics {
 }
 
 interface DimensionLabelData {
+  label: string
   lineEnd: THREE.Vector3
   lineStart: THREE.Vector3
+}
+
+interface DimensionLabelAnnotation {
+  angle: number
+  box: ScreenBox
+  h: number
+  label: string
+  w: number
+  x: number
+  y: number
 }
 
 interface DimensionSprite extends THREE.Sprite {
@@ -82,39 +93,9 @@ function addLine(group: THREE.Group, points: THREE.Vector3[], material: THREE.Ma
   group.add(line)
 }
 
-function makeTextSprite(text: string, color = '#163246'): THREE.Sprite {
-  const canvas = document.createElement('canvas')
-  const ctx = canvas.getContext('2d')
-  const fontSize = 42
-  const paddingX = 22
-  const paddingY = 14
-
-  canvas.width = 512
-  canvas.height = 128
-
-  if (ctx) {
-    ctx.font = `700 ${fontSize}px Arial, sans-serif`
-    const metrics = ctx.measureText(text)
-    canvas.width = Math.ceil(metrics.width + paddingX * 2)
-    canvas.height = fontSize + paddingY * 2
-    ctx.font = `700 ${fontSize}px Arial, sans-serif`
-    ctx.textBaseline = 'middle'
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.92)'
-    ctx.strokeStyle = 'rgba(35, 79, 108, 0.28)'
-    ctx.lineWidth = 4
-    roundRect(ctx, 0, 0, canvas.width, canvas.height, 14)
-    ctx.fill()
-    ctx.stroke()
-    ctx.fillStyle = color
-    ctx.fillText(text, paddingX, canvas.height / 2)
-  }
-
-  const texture = new THREE.CanvasTexture(canvas)
-  texture.colorSpace = THREE.SRGBColorSpace
-  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false })
+function makeTextSprite(): THREE.Sprite {
+  const material = new THREE.SpriteMaterial({ transparent: true, opacity: 0, depthTest: false, depthWrite: false })
   const sprite = new THREE.Sprite(material)
-  const aspect = canvas.width / canvas.height
-  sprite.scale.set(aspect * 0.28, 0.28, 1)
   sprite.renderOrder = 30
 
   return sprite
@@ -208,6 +189,330 @@ function layoutDimensionLabels(
   root.updateMatrixWorld(true)
   camera.updateMatrixWorld(true)
   alignDimensionLabels(root, camera, viewportWidth, viewportHeight)
+}
+
+function screenBoxesOverlap(a: ScreenBox, b: ScreenBox, gap = 6): boolean {
+  return a.x < b.x + b.w + gap && a.x + a.w + gap > b.x && a.y < b.y + b.h + gap && a.y + a.h + gap > b.y
+}
+
+function screenBoxOverlapArea(a: ScreenBox, b: ScreenBox): number {
+  const width = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x))
+  const height = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y))
+  return width * height
+}
+
+function collectDimensionLabelAnnotations(
+  ctx: CanvasRenderingContext2D,
+  root: THREE.Object3D,
+  camera: THREE.Camera,
+  viewportWidth: number,
+  viewportHeight: number,
+  uiScale: number
+): DimensionLabelAnnotation[] {
+  const annotations: DimensionLabelAnnotation[] = []
+
+  ctx.save()
+  ctx.font = `700 ${11 * uiScale}px Arial, sans-serif`
+
+  root.traverse((object) => {
+    if (!isDimensionSprite(object)) {
+      return
+    }
+
+    const data = object.userData.dimensionLabel
+    if (!data) {
+      return
+    }
+
+    const localCenter = data.lineStart.clone().add(data.lineEnd).multiplyScalar(0.5)
+    const parent = object.parent
+    const worldCenter = parent ? parent.localToWorld(localCenter) : localCenter
+    const worldStart = parent ? parent.localToWorld(data.lineStart.clone()) : data.lineStart.clone()
+    const worldEnd = parent ? parent.localToWorld(data.lineEnd.clone()) : data.lineEnd.clone()
+    const projectedCenter = worldToScreen(worldCenter, camera, viewportWidth, viewportHeight)
+    if (projectedCenter.z < -1 || projectedCenter.z > 1) {
+      return
+    }
+
+    const angle = getReadableScreenAngle(
+      worldToScreen(worldStart, camera, viewportWidth, viewportHeight),
+      worldToScreen(worldEnd, camera, viewportWidth, viewportHeight)
+    )
+    const w = ctx.measureText(data.label).width + 12 * uiScale
+    const h = 19 * uiScale
+    const boundsW = Math.abs(Math.cos(angle)) * w + Math.abs(Math.sin(angle)) * h
+    const boundsH = Math.abs(Math.sin(angle)) * w + Math.abs(Math.cos(angle)) * h
+    annotations.push({
+      angle,
+      box: {
+        x: projectedCenter.x - boundsW / 2,
+        y: projectedCenter.y - boundsH / 2,
+        w: boundsW,
+        h: boundsH
+      },
+      h,
+      label: data.label,
+      w,
+      x: projectedCenter.x,
+      y: projectedCenter.y
+    })
+  })
+
+  ctx.restore()
+  return annotations
+}
+
+function drawDimensionLabelAnnotations(
+  ctx: CanvasRenderingContext2D,
+  annotations: DimensionLabelAnnotation[],
+  uiScale: number
+): void {
+  ctx.save()
+  ctx.font = `700 ${11 * uiScale}px Arial, sans-serif`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+
+  for (const annotation of annotations) {
+    ctx.save()
+    ctx.translate(annotation.x, annotation.y)
+    ctx.rotate(annotation.angle)
+    roundRect(ctx, -annotation.w / 2, -annotation.h / 2, annotation.w, annotation.h, 4 * uiScale)
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.96)'
+    ctx.fill()
+    ctx.strokeStyle = '#163246'
+    ctx.lineWidth = uiScale
+    ctx.stroke()
+    ctx.fillStyle = '#163246'
+    ctx.fillText(annotation.label, 0, 0.5 * uiScale)
+    ctx.restore()
+  }
+
+  ctx.restore()
+}
+
+function isWorldPointOccluded(root: THREE.Object3D, camera: THREE.Camera, point: THREE.Vector3): boolean {
+  const cameraPosition = new THREE.Vector3()
+  camera.getWorldPosition(cameraPosition)
+  const direction = point.clone().sub(cameraPosition)
+  const distance = direction.length()
+  if (distance < 0.08) {
+    return false
+  }
+
+  const occluders: THREE.Object3D[] = []
+  root.traverse((object) => {
+    if (object instanceof THREE.Mesh && object.visible) {
+      occluders.push(object)
+    }
+  })
+
+  const raycaster = new THREE.Raycaster(cameraPosition, direction.normalize(), 0.01, distance - 0.06)
+  return raycaster.intersectObjects(occluders, false).length > 0
+}
+
+function drawArrowHead(
+  ctx: CanvasRenderingContext2D,
+  tip: ScreenPoint,
+  tangentX: number,
+  tangentY: number,
+  direction: 1 | -1,
+  size: number
+): void {
+  const crossX = -tangentY
+  const crossY = tangentX
+  const baseX = tip.x + tangentX * size * direction
+  const baseY = tip.y + tangentY * size * direction
+
+  ctx.beginPath()
+  ctx.moveTo(tip.x, tip.y)
+  ctx.lineTo(baseX + crossX * size * 0.46, baseY + crossY * size * 0.46)
+  ctx.lineTo(baseX - crossX * size * 0.46, baseY - crossY * size * 0.46)
+  ctx.closePath()
+  ctx.fill()
+}
+
+function drawCutDimensionAnnotations(
+  ctx: CanvasRenderingContext2D,
+  root: THREE.Object3D,
+  anchors: CutDimensionAnchor[],
+  camera: THREE.Camera,
+  viewportWidth: number,
+  viewportHeight: number
+): void {
+  const uiScale = clamp(Math.min(viewportWidth / 720, viewportHeight / 420), 0.9, 1.65)
+  const dimensionLabelScale = Math.min(uiScale, 22 / 19)
+  const dimensionLabels = collectDimensionLabelAnnotations(
+    ctx,
+    root,
+    camera,
+    viewportWidth,
+    viewportHeight,
+    dimensionLabelScale
+  )
+  const occupied = dimensionLabels.map((annotation) => annotation.box)
+  occupied.push({ x: viewportWidth - 104 * uiScale, y: 8 * uiScale, w: 96 * uiScale, h: 48 * uiScale })
+
+  const visible = anchors
+    .filter((anchor) => {
+      const midpoint = anchor.start.clone().add(anchor.end).multiplyScalar(0.5)
+      const toCamera = camera.position.clone().sub(midpoint).normalize()
+      const facesCamera = anchor.normal.dot(toCamera) > (anchor.kind === 'floor' ? 0.08 : 0.12)
+      return facesCamera && (!anchor.labelGuide || !isWorldPointOccluded(root, camera, anchor.labelGuide.position))
+    })
+    .sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'wall' ? -1 : 1))
+
+  ctx.save()
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.font = `700 ${11 * uiScale}px Arial, sans-serif`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  const color = '#9a4f12'
+  const labelsToDraw: Array<{ angle: number; h: number; label: string; w: number; x: number; y: number }> = []
+
+  for (const anchor of visible) {
+    const start = worldToScreen(anchor.start, camera, viewportWidth, viewportHeight)
+    const end = worldToScreen(anchor.end, camera, viewportWidth, viewportHeight)
+    if (start.z < -1 || start.z > 1 || end.z < -1 || end.z > 1) {
+      continue
+    }
+
+    const dx = end.x - start.x
+    const dy = end.y - start.y
+    const length = Math.hypot(dx, dy)
+    if (length < 2) {
+      continue
+    }
+
+    const tangentX = dx / length
+    const tangentY = dy / length
+    const midpointWorld = anchor.start.clone().add(anchor.end).multiplyScalar(0.5)
+    const midpoint = worldToScreen(midpointWorld, camera, viewportWidth, viewportHeight)
+    const annotationNormal = anchor.labelGuide
+      ? anchor.labelGuide.position.clone().sub(midpointWorld).normalize()
+      : anchor.normal
+    const normalPoint = worldToScreen(
+      midpointWorld.clone().add(annotationNormal.clone().multiplyScalar(0.35)),
+      camera,
+      viewportWidth,
+      viewportHeight
+    )
+    let normalX = normalPoint.x - midpoint.x
+    let normalY = normalPoint.y - midpoint.y
+    const normalLength = Math.hypot(normalX, normalY)
+    if (normalLength < 0.5) {
+      normalX = -tangentY
+      normalY = tangentX
+    } else {
+      normalX /= normalLength
+      normalY /= normalLength
+    }
+
+    const lineOffset = 11 * uiScale
+    const dimStart = { x: start.x + normalX * lineOffset, y: start.y + normalY * lineOffset, z: start.z }
+    const dimEnd = { x: end.x + normalX * lineOffset, y: end.y + normalY * lineOffset, z: end.z }
+    const dimMid = { x: (dimStart.x + dimEnd.x) / 2, y: (dimStart.y + dimEnd.y) / 2 }
+    const labelW = ctx.measureText(anchor.label).width + 12 * uiScale
+    const labelH = 19 * uiScale
+    const candidates: Array<{ x: number; y: number }> = []
+    let labelAngle = 0
+
+    if (anchor.labelGuide) {
+      const guideStart = worldToScreen(anchor.labelGuide.start, camera, viewportWidth, viewportHeight)
+      const guideEnd = worldToScreen(anchor.labelGuide.end, camera, viewportWidth, viewportHeight)
+      labelAngle = getReadableScreenAngle(guideStart, guideEnd)
+      candidates.push(worldToScreen(anchor.labelGuide.position, camera, viewportWidth, viewportHeight))
+    } else {
+      for (const direction of [1, -1]) {
+        for (const distance of [25, 42, 59]) {
+          candidates.push({
+            x: dimMid.x + normalX * distance * uiScale * direction,
+            y: dimMid.y + normalY * distance * uiScale * direction
+          })
+        }
+      }
+      for (const direction of [-1, 1]) {
+        candidates.push({
+          x: dimMid.x + tangentX * direction * (labelW / 2 + 16 * uiScale),
+          y: dimMid.y + tangentY * direction * (labelW / 2 + 16 * uiScale)
+        })
+      }
+    }
+
+    const margin = 8 * uiScale
+    const boundsW = Math.abs(Math.cos(labelAngle)) * labelW + Math.abs(Math.sin(labelAngle)) * labelH
+    const boundsH = Math.abs(Math.sin(labelAngle)) * labelW + Math.abs(Math.cos(labelAngle)) * labelH
+    const boxes = candidates.map((candidate) =>
+      anchor.labelGuide
+        ? { x: candidate.x - boundsW / 2, y: candidate.y - boundsH / 2, w: boundsW, h: boundsH }
+        : {
+            x: clamp(candidate.x - boundsW / 2, margin, viewportWidth - margin - boundsW),
+            y: clamp(candidate.y - boundsH / 2, margin, viewportHeight - margin - boundsH),
+            w: boundsW,
+            h: boundsH
+          }
+    )
+    const box = anchor.labelGuide
+      ? boxes[0]
+      : (boxes.find((candidate) => !occupied.some((other) => screenBoxesOverlap(candidate, other, 5 * uiScale))) ??
+        boxes.reduce((best, candidate) => {
+          const score = occupied.reduce((sum, other) => sum + screenBoxOverlapArea(candidate, other), 0)
+          const bestScore = occupied.reduce((sum, other) => sum + screenBoxOverlapArea(best, other), 0)
+          return score < bestScore ? candidate : best
+        }))
+    if (!box) {
+      continue
+    }
+    occupied.push(box)
+
+    const labelCenterX = box.x + box.w / 2
+    const labelCenterY = box.y + box.h / 2
+    ctx.strokeStyle = color
+    ctx.fillStyle = color
+    ctx.lineWidth = 1.35 * uiScale
+
+    ctx.beginPath()
+    ctx.moveTo(start.x, start.y)
+    ctx.lineTo(dimStart.x, dimStart.y)
+    ctx.moveTo(end.x, end.y)
+    ctx.lineTo(dimEnd.x, dimEnd.y)
+    ctx.moveTo(dimStart.x, dimStart.y)
+    ctx.lineTo(dimEnd.x, dimEnd.y)
+    ctx.stroke()
+
+    const arrowSize = Math.min(7 * uiScale, Math.max(3.5 * uiScale, length * 0.24))
+    drawArrowHead(ctx, dimStart, tangentX, tangentY, 1, arrowSize)
+    drawArrowHead(ctx, dimEnd, tangentX, tangentY, -1, arrowSize)
+
+    ctx.save()
+    ctx.setLineDash([3 * uiScale, 3 * uiScale])
+    ctx.beginPath()
+    ctx.moveTo(dimMid.x, dimMid.y)
+    ctx.lineTo(labelCenterX, labelCenterY)
+    ctx.stroke()
+    ctx.restore()
+
+    labelsToDraw.push({ angle: labelAngle, h: labelH, label: anchor.label, w: labelW, x: labelCenterX, y: labelCenterY })
+  }
+
+  drawDimensionLabelAnnotations(ctx, dimensionLabels, dimensionLabelScale)
+
+  for (const label of labelsToDraw) {
+    ctx.save()
+    ctx.translate(label.x, label.y)
+    ctx.rotate(label.angle)
+    roundRect(ctx, -label.w / 2, -label.h / 2, label.w, label.h, 4 * uiScale)
+    ctx.fillStyle = 'rgba(255, 250, 244, 0.96)'
+    ctx.fill()
+    ctx.strokeStyle = color
+    ctx.lineWidth = uiScale
+    ctx.stroke()
+    ctx.fillStyle = color
+    ctx.fillText(label.label, 0, 0.5 * uiScale)
+    ctx.restore()
+  }
+
+  ctx.restore()
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
@@ -318,6 +623,32 @@ function wallPanelSegments(spanM: number): Array<{ offsetM: number; sizeM: numbe
     offsetM: segment.offsetMm / 1000,
     sizeM: segment.sizeMm / 1000
   }))
+}
+
+interface CutDimensionAnchor {
+  end: THREE.Vector3
+  kind: 'floor' | 'wall'
+  label: string
+  labelGuide?: {
+    end: THREE.Vector3
+    position: THREE.Vector3
+    start: THREE.Vector3
+  }
+  normal: THREE.Vector3
+  start: THREE.Vector3
+}
+
+interface ScreenBox {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+interface ScreenPoint {
+  x: number
+  y: number
+  z: number
 }
 
 function addWallPanels(
@@ -720,9 +1051,10 @@ function addDimensionLine(
   addLine(group, [end.clone().sub(tick), end.clone().add(tick)], material)
 
   const labelCenter = start.clone().add(end).multiplyScalar(0.5)
-  const sprite = makeTextSprite(label)
+  const sprite = makeTextSprite()
   sprite.position.copy(labelCenter)
   ;(sprite as DimensionSprite).userData.dimensionLabel = {
+    label,
     lineEnd: end.clone(),
     lineStart: start.clone()
   }
@@ -803,7 +1135,85 @@ function addDimensions(
   )
 }
 
-function createChamberModel(input: ChamberInput): { group: THREE.Group; metrics: ModelMetrics } {
+function buildCutDimensionAnchors(input: ChamberInput, metrics: ModelMetrics, thicknessM: number): CutDimensionAnchor[] {
+  const runs = buildChamberPanelRuns(metrics.lengthMm, metrics.widthMm, input.thicknessMm, input.hasPanelFloor)
+  const anchors: CutDimensionAnchor[] = []
+  const wallY = metrics.wallHeightM * 0.62
+  const surfaceOffset = Math.max(thicknessM * 0.12, 0.018)
+
+  if (runs.longWall.hasCut) {
+    const cutM = runs.longWall.remainderMm / 1000
+    const startX = metrics.lengthM / 2 - cutM
+    const endX = metrics.lengthM / 2
+
+    anchors.push({
+      end: new THREE.Vector3(endX, wallY, -metrics.widthM / 2 - surfaceOffset),
+      kind: 'wall',
+      label: formatMm(runs.longWall.remainderMm),
+      normal: new THREE.Vector3(0, 0, -1),
+      start: new THREE.Vector3(startX, wallY, -metrics.widthM / 2 - surfaceOffset)
+    })
+    anchors.push({
+      end: new THREE.Vector3(endX, wallY, metrics.widthM / 2 + surfaceOffset),
+      kind: 'wall',
+      label: formatMm(runs.longWall.remainderMm),
+      normal: new THREE.Vector3(0, 0, 1),
+      start: new THREE.Vector3(startX, wallY, metrics.widthM / 2 + surfaceOffset)
+    })
+  }
+
+  if (runs.shortWall.hasCut) {
+    const cutM = runs.shortWall.remainderMm / 1000
+    const endZ = metrics.widthM / 2 - thicknessM
+    const startZ = endZ - cutM
+
+    anchors.push({
+      end: new THREE.Vector3(-metrics.lengthM / 2 - surfaceOffset, wallY, endZ),
+      kind: 'wall',
+      label: formatMm(runs.shortWall.remainderMm),
+      normal: new THREE.Vector3(-1, 0, 0),
+      start: new THREE.Vector3(-metrics.lengthM / 2 - surfaceOffset, wallY, startZ)
+    })
+    anchors.push({
+      end: new THREE.Vector3(metrics.lengthM / 2 + surfaceOffset, wallY, endZ),
+      kind: 'wall',
+      label: formatMm(runs.shortWall.remainderMm),
+      normal: new THREE.Vector3(1, 0, 0),
+      start: new THREE.Vector3(metrics.lengthM / 2 + surfaceOffset, wallY, startZ)
+    })
+  }
+
+  if (runs.floor?.hasCut) {
+    const cutM = runs.floor.remainderMm / 1000
+    const endX = metrics.floorLengthM / 2
+    const startX = endX - cutM
+    const frontZ = -metrics.floorWidthM / 2 - surfaceOffset
+    const dimensionY = 0.08
+    const dimensionZ = -metrics.widthM / 2 - thicknessM - Math.max(metrics.widthM * 0.11, 0.62)
+    const labelDistanceM = Math.max(metrics.widthM * 0.4, 1.6)
+
+    anchors.push({
+      end: new THREE.Vector3(endX, Math.max(thicknessM * 0.45, 0.025), frontZ),
+      kind: 'floor',
+      label: `Пол · ${formatMm(runs.floor.remainderMm)}`,
+      labelGuide: {
+        end: new THREE.Vector3(-metrics.lengthM / 2, dimensionY, dimensionZ),
+        position: new THREE.Vector3(metrics.lengthM / 2, dimensionY, dimensionZ - labelDistanceM),
+        start: new THREE.Vector3(metrics.lengthM / 2, dimensionY, dimensionZ)
+      },
+      normal: new THREE.Vector3(0, 1, 0),
+      start: new THREE.Vector3(startX, Math.max(thicknessM * 0.45, 0.025), frontZ)
+    })
+  }
+
+  return anchors
+}
+
+function createChamberModel(input: ChamberInput): {
+  group: THREE.Group
+  metrics: ModelMetrics
+  cutDimensions: CutDimensionAnchor[]
+} {
   const group = new THREE.Group()
   const lengthMm = Math.max(input.lengthMm, input.widthMm)
   const widthMm = Math.min(input.lengthMm, input.widthMm)
@@ -868,7 +1278,7 @@ function createChamberModel(input: ChamberInput): { group: THREE.Group; metrics:
   addDoor(group, input, metrics, doorMaterial, frameMaterial, glassMaterial, handleMaterial)
   addDimensions(group, input, metrics, thicknessM)
 
-  return { group, metrics }
+  return { group, metrics, cutDimensions: buildCutDimensionAnchors(input, metrics, thicknessM) }
 }
 
 function addSceneLights(scene: THREE.Scene, maxSideM: number): void {
@@ -920,7 +1330,7 @@ export function renderChamber3DToDataUrl(
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(0xeef2f5)
 
-  const { group, metrics } = createChamberModel(input)
+  const { group, metrics, cutDimensions } = createChamberModel(input)
   scene.add(group)
 
   const maxSideM = Math.max(metrics.lengthM, metrics.widthM, metrics.totalHeightM)
@@ -940,7 +1350,15 @@ export function renderChamber3DToDataUrl(
   layoutDimensionLabels(scene, camera, width, height)
   renderer.render(scene, camera)
 
-  const dataUrl = renderer.domElement.toDataURL('image/png')
+  const composite = document.createElement('canvas')
+  composite.width = width
+  composite.height = height
+  const compositeContext = composite.getContext('2d')
+  if (compositeContext) {
+    compositeContext.drawImage(renderer.domElement, 0, 0, width, height)
+    drawCutDimensionAnnotations(compositeContext, scene, cutDimensions, camera, width, height)
+  }
+  const dataUrl = compositeContext ? composite.toDataURL('image/png') : renderer.domElement.toDataURL('image/png')
   renderer.dispose()
   renderer.forceContextLoss()
   disposeScene(scene)
@@ -1017,7 +1435,7 @@ export function Chamber3DView({ input }: Chamber3DViewProps): JSX.Element {
     const scene = new THREE.Scene()
     scene.background = new THREE.Color(0xeef2f5)
 
-    const { group, metrics } = createChamberModel(input)
+    const { group, metrics, cutDimensions } = createChamberModel(input)
     scene.add(group)
 
     const maxSideM = Math.max(metrics.lengthM, metrics.widthM, metrics.totalHeightM)
@@ -1027,7 +1445,10 @@ export function Chamber3DView({ input }: Chamber3DViewProps): JSX.Element {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.domElement.className = 'chamber-3d-canvas'
-    container.replaceChildren(renderer.domElement)
+    const annotationCanvas = document.createElement('canvas')
+    const annotationContext = annotationCanvas.getContext('2d')
+    annotationCanvas.className = 'chamber-3d-annotations'
+    container.replaceChildren(renderer.domElement, annotationCanvas)
 
     const camera = new THREE.PerspectiveCamera(CAMERA_FOV_DEG, 1, 0.03, Math.max(80, maxSideM * 12))
     const controls = new OrbitControls(camera, renderer.domElement)
@@ -1063,7 +1484,12 @@ export function Chamber3DView({ input }: Chamber3DViewProps): JSX.Element {
     const resize = (): void => {
       const width = Math.max(container.clientWidth, 320)
       const height = Math.max(container.clientHeight, 260)
+      const pixelRatio = Math.min(window.devicePixelRatio || 1, 2)
       renderer.setSize(width, height, false)
+      annotationCanvas.width = Math.round(width * pixelRatio)
+      annotationCanvas.height = Math.round(height * pixelRatio)
+      annotationCanvas.style.width = `${width}px`
+      annotationCanvas.style.height = `${height}px`
       configurePerspectiveCamera(camera, width, height)
     }
 
@@ -1083,6 +1509,14 @@ export function Chamber3DView({ input }: Chamber3DViewProps): JSX.Element {
         renderer.domElement.clientHeight || container.clientHeight
       )
       renderer.render(scene, camera)
+      if (annotationContext) {
+        const width = renderer.domElement.clientWidth || container.clientWidth
+        const height = renderer.domElement.clientHeight || container.clientHeight
+        const pixelRatio = annotationCanvas.width / Math.max(width, 1)
+        annotationContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
+        annotationContext.clearRect(0, 0, width, height)
+        drawCutDimensionAnnotations(annotationContext, scene, cutDimensions, camera, width, height)
+      }
       frameId = window.requestAnimationFrame(render)
     })
 

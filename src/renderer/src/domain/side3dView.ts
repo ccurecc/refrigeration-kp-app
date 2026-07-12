@@ -1,5 +1,5 @@
 import type { ChamberInput, ChamberResult } from './calculator'
-import { buildCenteredDoorSpan } from './chamberGeometry'
+import { buildCenteredDoorSpan, buildChamberPanelRuns } from './chamberGeometry'
 
 interface Point {
   x: number
@@ -30,6 +30,21 @@ function dim(start: Point, end: Point, label: string, labelOffset: Point = { x: 
   return `${line(start, end)}${text(mid, label)}`
 }
 
+function cutDim(start: Point, end: Point, label: string, offset: Point, labelOffset: Point): string {
+  const dimStart = { x: start.x + offset.x, y: start.y + offset.y }
+  const dimEnd = { x: end.x + offset.x, y: end.y + offset.y }
+  const mid = {
+    x: (dimStart.x + dimEnd.x) / 2 + labelOffset.x,
+    y: (dimStart.y + dimEnd.y) / 2 + labelOffset.y
+  }
+
+  return `${line(start, dimStart, 'cut-extension')}${line(end, dimEnd, 'cut-extension')}${line(
+    dimStart,
+    dimEnd,
+    'cut-dim-line'
+  )}${text(mid, label)}`
+}
+
 export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): string {
   const longMm = result.longSideMm
   const shortMm = result.shortSideMm
@@ -38,6 +53,7 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
   const wallHeightMm = Math.max(heightMm - thicknessMm, thicknessMm)
   const floorLongMm = Math.max(0, longMm - 2 * thicknessMm)
   const floorShortMm = Math.max(0, shortMm - 2 * thicknessMm)
+  const panelRuns = buildChamberPanelRuns(longMm, shortMm, thicknessMm, input.hasPanelFloor)
 
   const width = 900
   const height = 430
@@ -68,6 +84,34 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
   ]
   const ceiling = [p(0, heightMm, 0), p(longMm, heightMm, 0), p(longMm, heightMm, shortMm), p(0, heightMm, shortMm)]
   const door = [p(doorLeftMm, 0, -35), p(doorRightMm, 0, -35), p(doorRightMm, doorHeightMm, -35), p(doorLeftMm, doorHeightMm, -35)]
+  const frontCut = panelRuns.longWall.hasCut
+    ? [
+        p(longMm - panelRuns.longWall.remainderMm, 0, -12),
+        p(longMm, 0, -12),
+        p(longMm, wallHeightMm, -12),
+        p(longMm - panelRuns.longWall.remainderMm, wallHeightMm, -12)
+      ]
+    : null
+  const shortCutStartMm = shortMm - thicknessMm - panelRuns.shortWall.remainderMm
+  const shortCutEndMm = shortMm - thicknessMm
+  const rightCut = panelRuns.shortWall.hasCut
+    ? [
+        p(longMm, 0, shortCutStartMm),
+        p(longMm, 0, shortCutEndMm),
+        p(longMm, wallHeightMm, shortCutEndMm),
+        p(longMm, wallHeightMm, shortCutStartMm)
+      ]
+    : null
+  const floorCutStartMm = thicknessMm + floorLongMm - (panelRuns.floor?.remainderMm ?? 0)
+  const floorCutEndMm = thicknessMm + floorLongMm
+  const floorCut = panelRuns.floor?.hasCut
+    ? [
+        p(floorCutStartMm, thicknessMm + 10, thicknessMm),
+        p(floorCutEndMm, thicknessMm + 10, thicknessMm),
+        p(floorCutEndMm, thicknessMm + 10, thicknessMm + floorShortMm),
+        p(floorCutStartMm, thicknessMm + 10, thicknessMm + floorShortMm)
+      ]
+    : null
 
   const panelStep = 1190
   const frontSeams: string[] = []
@@ -115,6 +159,33 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
     `Высота двери ${fmt(input.doorHeightMm)}`,
     { x: 54, y: 4 }
   )
+  const longWallCutDim = panelRuns.longWall.hasCut
+    ? cutDim(
+        p(longMm - panelRuns.longWall.remainderMm, wallHeightMm * 0.63, -28),
+        p(longMm, wallHeightMm * 0.63, -28),
+        fmt(panelRuns.longWall.remainderMm),
+        { x: 0, y: -12 },
+        { x: 0, y: -12 }
+      )
+    : ''
+  const shortWallCutDim = panelRuns.shortWall.hasCut
+    ? cutDim(
+        p(longMm + 35, wallHeightMm * 0.58, shortCutStartMm),
+        p(longMm + 35, wallHeightMm * 0.58, shortCutEndMm),
+        fmt(panelRuns.shortWall.remainderMm),
+        { x: 18, y: 0 },
+        { x: 30, y: -10 }
+      )
+    : ''
+  const floorCutDim = panelRuns.floor?.hasCut
+    ? cutDim(
+        p(floorCutStartMm, thicknessMm + 25, thicknessMm + floorShortMm * 0.45),
+        p(floorCutEndMm, thicknessMm + 25, thicknessMm + floorShortMm * 0.45),
+        `Пол · ${fmt(panelRuns.floor.remainderMm)}`,
+        { x: 0, y: 14 },
+        { x: 0, y: 16 }
+      )
+    : ''
 
   return `
     <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="3D-вид камеры с размерами">
@@ -125,6 +196,8 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
       </defs>
       <style>
         .dim-line { stroke: #163246; stroke-width: 1.7; marker-start: url(#dim-arrow); marker-end: url(#dim-arrow); }
+        .cut-dim-line { stroke: #9a4f12; stroke-width: 1.5; marker-start: url(#dim-arrow); marker-end: url(#dim-arrow); }
+        .cut-extension { stroke: #9a4f12; stroke-width: 1; stroke-dasharray: 3 3; }
         .seam-line { stroke: #8a9096; stroke-width: 1; }
         .floor-seam { stroke: #a8a39a; stroke-width: 1; }
         .dim-text { font: 700 13px Arial, sans-serif; fill: #163246; stroke: #fff; stroke-width: 4px; paint-order: stroke; }
@@ -134,6 +207,9 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
       ${polygon(rightWall, '#d2dee8', '#234f6c', 0.92)}
       ${polygon(frontWall, '#f8fbfd', '#234f6c', 0.78)}
       ${polygon(floor, input.hasPanelFloor ? '#ffffff' : '#e6edf2', '#7c8896', input.hasPanelFloor ? 1 : 0.8)}
+      ${frontCut ? polygon(frontCut, '#f4cda0', '#9a4f12', 0.9) : ''}
+      ${rightCut ? polygon(rightCut, '#f4cda0', '#9a4f12', 0.9) : ''}
+      ${floorCut ? polygon(floorCut, '#f4cda0', '#9a4f12', 0.82) : ''}
       ${floorSeams.join('')}
       ${frontSeams.join('')}
       ${polygon(ceiling, '#ffffff', '#234f6c', 0.96)}
@@ -145,6 +221,9 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
       ${heightDim}
       ${doorWidthDim}
       ${doorHeightDim}
+      ${longWallCutDim}
+      ${shortWallCutDim}
+      ${floorCutDim}
     </svg>
   `
 }

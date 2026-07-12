@@ -1,5 +1,5 @@
 import { PANEL_WORKING_WIDTH_MM } from './calculator'
-import { buildCenteredDoorSpan, buildPanelRun } from './chamberGeometry'
+import { buildCenteredDoorSpan, buildChamberPanelRuns, buildPanelRun } from './chamberGeometry'
 
 export type TopShape =
   | { k: 'rect'; x: number; y: number; w: number; h: number; fill?: string; stroke?: string; sw?: number }
@@ -51,7 +51,9 @@ const COLORS = {
   dimLine: '#566270',
   title: '#1f2933',
   legendText: '#33414e',
-  panelEdge: '#7c8896'
+  panelEdge: '#7c8896',
+  cutDim: '#9a4f12',
+  cutLabel: '#fffaf4'
 }
 
 const ARROW = 7
@@ -99,9 +101,9 @@ export function buildTopView(params: TopViewParams): TopViewModel {
   const step = PANEL_WORKING_WIDTH_MM * scale
   const ceilingRun = buildPanelRun(longMm)
   const fullStrips = ceilingRun.fullPanelCount
-  const floorLongMm = Math.max(0, longMm - 2 * thicknessMm)
-  const floorRun = buildPanelRun(floorLongMm)
-  const floorFullStrips = floorRun.fullPanelCount
+  const panelRuns = buildChamberPanelRuns(longMm, shortMm, thicknessMm, hasPanelFloor)
+  const floorRun = panelRuns.floor
+  const floorFullStrips = floorRun?.fullPanelCount ?? 0
 
   const shapes: TopShape[] = []
 
@@ -128,7 +130,7 @@ export function buildTopView(params: TopViewParams): TopViewModel {
   if (hasPanelFloor) {
     shapes.push({ k: 'rect', x: ix0, y: iy0, w: iw, h: ih, fill: COLORS.floor, stroke: COLORS.panelEdge, sw: 0.7 })
 
-    if (floorRun.hasCut) {
+    if (floorRun?.hasCut) {
       shapes.push({ k: 'rect', x: ix0, y: iy0, w: floorRun.remainderMm * scale, h: ih, fill: COLORS.cut })
     }
 
@@ -205,9 +207,9 @@ export function buildTopView(params: TopViewParams): TopViewModel {
   const leftWall = { x: x0, y: y0 + tw, w: tw, h: Math.max(0, ch - 2 * tw) }
 
   const longWallSpanMm = longMm
-  const shortWallSpanMm = Math.max(0, shortMm - 2 * thicknessMm)
-  const longWallRun = buildPanelRun(longWallSpanMm)
-  const shortWallRun = buildPanelRun(shortWallSpanMm)
+  const shortWallSpanMm = panelRuns.shortWallSpanMm
+  const longWallRun = panelRuns.longWall
+  const shortWallRun = panelRuns.shortWall
 
   drawHorizontalWallPanels(topWall, longWallSpanMm, true)
   drawVerticalWallPanels(rightWall, shortWallSpanMm, true)
@@ -249,6 +251,178 @@ export function buildTopView(params: TopViewParams): TopViewModel {
   shapes.push({ k: 'rect', x: dx, y: bottomWall.y, w: doorW, h: bottomWall.h, fill: COLORS.door, stroke: COLORS.wallStroke, sw: 1 })
   shapes.push({ k: 'rect', x: dx - el, y: bottomWall.y, w: el, h: bottomWall.h, fill: COLORS.channel })
   shapes.push({ k: 'rect', x: dx + doorW, y: bottomWall.y, w: el, h: bottomWall.h, fill: COLORS.channel })
+
+  // ---- Cut-panel dimensions -------------------------------------------------
+  // Labels do not sit inside the narrow wall strips. Each one is attached to
+  // the real cut span and allocated to the first free screen-space lane.
+  type LabelBox = { x: number; y: number; w: number; h: number }
+  type ScreenPoint = { x: number; y: number }
+  type CutDimensionOptions = {
+    forceRight?: boolean
+    preferredGap?: number
+    rightGap?: number
+    rightOffsetY?: number
+  }
+  const labelBounds = { left: padLeft + 5, right: zoneRight - 5, top: padTop + 5, bottom: height - padBottom - 5 }
+  const labelBoxes: LabelBox[] = [
+    { x: padLeft - 5, y: 8, w: availW + 10, h: 30 },
+    { x: width - legendW, y: padTop - 18, w: legendW, h: height - padTop + 18 },
+    { x: (x0 + x1) / 2 - 48, y: y1 + 29, w: 96, h: 26 },
+    { x: x0 - 59, y: (y0 + y1) / 2 - 48, w: 26, h: 96 },
+    { x: dx - 8, y: bottomWall.y - 7, w: doorW + el * 2 + 16, h: bottomWall.h + 14 }
+  ]
+
+  const overlaps = (a: LabelBox, b: LabelBox, gap = 4): boolean =>
+    a.x < b.x + b.w + gap && a.x + a.w + gap > b.x && a.y < b.y + b.h + gap && a.y + a.h + gap > b.y
+
+  const overlapArea = (a: LabelBox, b: LabelBox): number => {
+    const w = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x))
+    const h = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y))
+    return w * h
+  }
+
+  const addCutDimension = (
+    start: ScreenPoint,
+    end: ScreenPoint,
+    preferredNormal: ScreenPoint,
+    label: string,
+    options: CutDimensionOptions = {}
+  ): void => {
+    const dxLine = end.x - start.x
+    const dyLine = end.y - start.y
+    const length = Math.hypot(dxLine, dyLine)
+    if (length < 0.5) {
+      return
+    }
+
+    const tangent = { x: dxLine / length, y: dyLine / length }
+    const normalLength = Math.max(Math.hypot(preferredNormal.x, preferredNormal.y), 1)
+    const normal = { x: preferredNormal.x / normalLength, y: preferredNormal.y / normalLength }
+    const lineOffset = 9
+    const dimStart = { x: start.x + normal.x * lineOffset, y: start.y + normal.y * lineOffset }
+    const dimEnd = { x: end.x + normal.x * lineOffset, y: end.y + normal.y * lineOffset }
+    const mid = { x: (dimStart.x + dimEnd.x) / 2, y: (dimStart.y + dimEnd.y) / 2 }
+    const fontSize = 12
+    const labelW = label.length * fontSize * 0.61 + 16
+    const labelH = 22
+    const candidates: ScreenPoint[] = []
+
+    if (options.forceRight) {
+      const rightGap = options.rightGap ?? 14
+      for (const distance of [rightGap, rightGap + 18, rightGap + 36]) {
+        candidates.push({ x: end.x + distance + labelW / 2, y: mid.y + (options.rightOffsetY ?? 0) })
+      }
+    } else {
+      const preferredDistance =
+        options.preferredGap === undefined
+          ? 20
+          : Math.abs(normal.x) * (labelW / 2) + Math.abs(normal.y) * (labelH / 2) + options.preferredGap
+      for (const distance of [preferredDistance, preferredDistance + 16, preferredDistance + 32]) {
+        candidates.push({ x: mid.x + normal.x * distance, y: mid.y + normal.y * distance })
+      }
+      for (const distance of [20, 36, 52]) {
+        candidates.push({ x: mid.x - normal.x * distance, y: mid.y - normal.y * distance })
+      }
+      for (const direction of [-1, 1]) {
+        candidates.push({
+          x: mid.x + tangent.x * direction * (labelW / 2 + 14),
+          y: mid.y + tangent.y * direction * (labelW / 2 + 14)
+        })
+      }
+    }
+
+    const boxes = candidates.map((candidate) => {
+      const x = clamp(candidate.x - labelW / 2, labelBounds.left, labelBounds.right - labelW)
+      const y = clamp(candidate.y - labelH / 2, labelBounds.top, labelBounds.bottom - labelH)
+      return { x, y, w: labelW, h: labelH }
+    })
+    const box =
+      boxes.find((candidate) => !labelBoxes.some((occupied) => overlaps(candidate, occupied))) ??
+      boxes.reduce((best, candidate) => {
+        const score = labelBoxes.reduce((sum, occupied) => sum + overlapArea(candidate, occupied), 0)
+        const bestScore = labelBoxes.reduce((sum, occupied) => sum + overlapArea(best, occupied), 0)
+        return score < bestScore ? candidate : best
+      })
+
+    labelBoxes.push(box)
+    const labelCenter = { x: box.x + box.w / 2, y: box.y + box.h / 2 }
+    const arrow = Math.min(6, Math.max(3, length * 0.28))
+    const arrowHalf = arrow * 0.48
+    const cross = { x: -tangent.y, y: tangent.x }
+
+    shapes.push({ k: 'line', x1: start.x, y1: start.y, x2: dimStart.x, y2: dimStart.y, stroke: COLORS.cutDim, sw: 1 })
+    shapes.push({ k: 'line', x1: end.x, y1: end.y, x2: dimEnd.x, y2: dimEnd.y, stroke: COLORS.cutDim, sw: 1 })
+    shapes.push({ k: 'line', x1: dimStart.x, y1: dimStart.y, x2: dimEnd.x, y2: dimEnd.y, stroke: COLORS.cutDim, sw: 1.4 })
+    shapes.push({
+      k: 'poly',
+      points: `${dimStart.x},${dimStart.y} ${dimStart.x + tangent.x * arrow + cross.x * arrowHalf},${
+        dimStart.y + tangent.y * arrow + cross.y * arrowHalf
+      } ${dimStart.x + tangent.x * arrow - cross.x * arrowHalf},${dimStart.y + tangent.y * arrow - cross.y * arrowHalf}`,
+      fill: COLORS.cutDim
+    })
+    shapes.push({
+      k: 'poly',
+      points: `${dimEnd.x},${dimEnd.y} ${dimEnd.x - tangent.x * arrow + cross.x * arrowHalf},${
+        dimEnd.y - tangent.y * arrow + cross.y * arrowHalf
+      } ${dimEnd.x - tangent.x * arrow - cross.x * arrowHalf},${dimEnd.y - tangent.y * arrow - cross.y * arrowHalf}`,
+      fill: COLORS.cutDim
+    })
+    shapes.push({
+      k: 'line',
+      x1: mid.x,
+      y1: mid.y,
+      x2: labelCenter.x,
+      y2: labelCenter.y,
+      stroke: COLORS.cutDim,
+      sw: 1,
+      dash: '3 3'
+    })
+    shapes.push({ k: 'rect', x: box.x, y: box.y, w: box.w, h: box.h, fill: COLORS.cutLabel, stroke: COLORS.cutDim, sw: 1 })
+    shapes.push({
+      k: 'text',
+      x: labelCenter.x,
+      y: labelCenter.y + 4,
+      text: label,
+      anchor: 'middle',
+      size: fontSize,
+      weight: 700,
+      fill: COLORS.cutDim
+    })
+  }
+
+  if (longWallRun.hasCut) {
+    const cutW = longWallRun.remainderMm * scale
+    addCutDimension(
+      { x: x0, y: y1 - tw },
+      { x: x0 + cutW, y: y1 - tw },
+      { x: 0, y: -1 },
+      `${Math.round(longWallRun.remainderMm)} мм`,
+      { forceRight: true, rightGap: 18, rightOffsetY: -30 }
+    )
+  }
+
+  if (shortWallRun.hasCut) {
+    const cutH = shortWallRun.remainderMm * scale
+    addCutDimension(
+      { x: x1 - tw, y: y0 + tw },
+      { x: x1 - tw, y: y0 + tw + cutH },
+      { x: -1, y: 0 },
+      `${Math.round(shortWallRun.remainderMm)} мм`,
+      { preferredGap: 8 }
+    )
+  }
+
+  if (floorRun?.hasCut) {
+    const cutW = floorRun.remainderMm * scale
+    const floorDimY = iy0 + ih * 0.55
+    addCutDimension(
+      { x: ix0, y: floorDimY },
+      { x: ix0 + cutW, y: floorDimY },
+      { x: 0, y: 1 },
+      `Пол · ${Math.round(floorRun.remainderMm)} мм`,
+      { forceRight: true, rightGap: 14 }
+    )
+  }
 
   // ---- Dimension lines (bottom = long side, left = short side) ----
   const labelBox = (cx: number, cy: number, text: string, size: number, vertical: boolean): void => {
@@ -300,7 +474,7 @@ export function buildTopView(params: TopViewParams): TopViewModel {
     { color: COLORS.door, label: 'Дверной проём (швеллер)' },
     { color: hasPanelFloor ? COLORS.floor : COLORS.roomFloor, label: hasPanelFloor ? 'Пол между стенами' : 'Пол помещения' }
   ]
-  if (ceilingRun.hasCut || (hasPanelFloor && floorRun.hasCut) || longWallRun.hasCut || shortWallRun.hasCut) {
+  if (ceilingRun.hasCut || Boolean(floorRun?.hasCut) || longWallRun.hasCut || shortWallRun.hasCut) {
     legendItems.push({ color: COLORS.cut, label: 'Подрезка панели' })
   }
   legendItems.push({ color: COLORS.wallFill, label: 'Длинные стены поверх торцевых' })
