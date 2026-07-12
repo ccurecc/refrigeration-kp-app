@@ -921,10 +921,10 @@ export function App(): JSX.Element {
             )}
           </FormCard>
 
-          <FormCard title="Примечание">
+          <FormCard title="Дополнительная информация">
             <textarea
               className="proposal-note-input"
-              placeholder="Введите примечание, которое будет добавлено в конец КП"
+              placeholder="Введите дополнительную информацию, которая будет добавлена в конец КП"
               value={proposal.note}
               onChange={(event) => updateProposal('note', event.target.value)}
             />

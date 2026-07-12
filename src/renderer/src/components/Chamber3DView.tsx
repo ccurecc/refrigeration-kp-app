@@ -1290,7 +1290,7 @@ function buildCutDimensionAnchors(input: ChamberInput, metrics: ModelMetrics, th
     const frontZ = -metrics.floorWidthM / 2 - surfaceOffset
     const dimensionY = 0.08
     const dimensionZ = -metrics.widthM / 2 - thicknessM - Math.max(metrics.widthM * 0.11, 0.62)
-    const labelDistanceM = Math.max(metrics.widthM * 0.4, 1.6)
+    const labelDistanceM = Math.max(metrics.widthM * 0.18, 0.8)
 
     anchors.push({
       end: new THREE.Vector3(endX, Math.max(thicknessM * 0.45, 0.025), frontZ),

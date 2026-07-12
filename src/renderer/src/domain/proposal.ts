@@ -325,7 +325,7 @@ export function buildProposalHtml({
       </table>
       ${
         proposalNote
-          ? `<section class="proposal-note"><h2>Примечание</h2><p>${escapeHtml(proposalNote)}</p></section>`
+          ? `<section class="proposal-note"><h2>Дополнительная информация</h2><p>${escapeHtml(proposalNote)}</p></section>`
           : ''
       }
       <div class="footer">Расчет двери не уменьшает площадь стеновых панелей: проем вырезается в готовой стене. Все цены и состав работ действительны на дату формирования КП.</div>
