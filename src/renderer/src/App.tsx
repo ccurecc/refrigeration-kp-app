@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Copy, FolderOpen, ImagePlus, Plus, Printer, Save, Settings, Snowflake, Trash2, Wand2, X } from 'lucide-react'
+import { Copy, FolderOpen, ImagePlus, Move, Plus, Printer, Save, Settings, Snowflake, Trash2, Wand2, X } from 'lucide-react'
 import {
   calculateProposal,
   createChamber,
@@ -9,6 +9,7 @@ import {
   PanelFilling,
   PanelThickness,
   ChamberInput,
+  DoorWall,
   EstimateExtraRow,
   ProposalOptions
 } from './domain/calculator'
@@ -29,6 +30,8 @@ import { Chamber3DView, renderChamber3DToDataUrl } from './components/Chamber3DV
 import { TopView } from './components/TopView'
 import { SettingsModal } from './components/SettingsModal'
 import { NumberField } from './components/NumberField'
+import { DoorPositionEditor } from './components/DoorPositionEditor'
+import { normalizeDoorPlacement } from './domain/chamberGeometry'
 import './styles/app.css'
 
 const thicknessOptions: PanelThickness[] = [50, 60, 80, 100, 120]
@@ -108,6 +111,16 @@ function defaultFileName(chambers: ChamberInput[], proposal: ProposalSettings): 
   return `${prefix}_${size}${suffix}`
 }
 
+function normalizeChamberDoor(chamber: ChamberInput): ChamberInput {
+  const placement = normalizeDoorPlacement(chamber)
+  return {
+    ...chamber,
+    doorWidthMm: placement.widthMm,
+    doorWall: placement.wall,
+    doorOffsetMm: placement.offsetMm
+  }
+}
+
 export function App(): JSX.Element {
   const [chambers, setChambers] = useState<ChamberInput[]>([defaultChamberInput])
   const [activeId, setActiveId] = useState<string>(defaultChamberInput.id)
@@ -121,6 +134,7 @@ export function App(): JSX.Element {
   const [isBusy, setIsBusy] = useState(false)
   const [settingsLoaded, setSettingsLoaded] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [doorEditorOpen, setDoorEditorOpen] = useState(false)
 
   const activeChamber = chambers.find((chamber) => chamber.id === activeId) ?? chambers[0]
   const proposalResult = useMemo(
@@ -137,7 +151,11 @@ export function App(): JSX.Element {
   const activeRows = options.proposalMode === 'compact' ? activeResult.compactRows : activeResult.materialRows
 
   const updateActive = <K extends keyof ChamberInput>(key: K, value: ChamberInput[K]): void => {
-    setChambers((current) => current.map((chamber) => (chamber.id === activeId ? { ...chamber, [key]: value } : chamber)))
+    setChambers((current) =>
+      current.map((chamber) =>
+        chamber.id === activeId ? normalizeChamberDoor({ ...chamber, [key]: value }) : chamber
+      )
+    )
   }
 
   const updateOptions = <K extends keyof ProposalOptions>(key: K, value: ProposalOptions[K]): void => {
@@ -275,14 +293,14 @@ export function App(): JSX.Element {
     setCustomer({ ...defaultCustomerData, ...saved.customer })
 
     if (saved.chambers && saved.chambers.length > 0) {
-      const restored = saved.chambers.map((chamber) => ({ ...defaultChamberInput, ...chamber }))
+      const restored = saved.chambers.map((chamber) => normalizeChamberDoor({ ...defaultChamberInput, ...chamber }))
       setChambers(restored)
       setActiveId(restored[0].id)
       setOptions({ ...defaultProposalOptions, ...saved.options })
       setEquipmentImages(saved.equipmentImages ?? {})
     } else if (saved.input) {
       // Legacy single-chamber file.
-      const legacy = createChamber({ ...defaultChamberInput, ...saved.input })
+      const legacy = normalizeChamberDoor(createChamber({ ...defaultChamberInput, ...saved.input }))
       setChambers([legacy])
       setActiveId(legacy.id)
       setOptions({
@@ -330,7 +348,7 @@ export function App(): JSX.Element {
       const saveResult = await window.fwApp.saveCalculation({
         defaultName: defaultFileName(chambers, proposal),
         data: {
-          version: 2,
+          version: 3,
           savedAt: new Date().toISOString(),
           proposal,
           company,
@@ -766,6 +784,18 @@ export function App(): JSX.Element {
                 {numberInput(activeChamber.doorHeightMm, (value) => updateActive('doorHeightMm', value), 1)}
               </div>
             </label>
+            <button className="door-position-button" type="button" onClick={() => setDoorEditorOpen(true)}>
+              <Move size={16} />
+              <span>
+                Изменить положение двери
+                <small>
+                  {{ front: 'передняя', right: 'правая', back: 'задняя', left: 'левая' }[activeChamber.doorWall]} стена
+                  {Math.abs(activeChamber.doorOffsetMm) < 1
+                    ? ' · по центру'
+                    : ` · смещение ${Math.round(activeChamber.doorOffsetMm)} мм`}
+                </small>
+              </span>
+            </button>
             <label className="checkbox-field">
               <input
                 type="checkbox"
@@ -1083,6 +1113,20 @@ export function App(): JSX.Element {
         onClose={() => setSettingsOpen(false)}
         onCompanyChange={updateCompany}
         onCatalogChange={updateCatalog}
+      />
+      <DoorPositionEditor
+        open={doorEditorOpen}
+        input={activeChamber}
+        onClose={() => setDoorEditorOpen(false)}
+        onApply={(doorWall: DoorWall, doorOffsetMm: number) => {
+          setChambers((current) =>
+            current.map((chamber) =>
+              chamber.id === activeId ? normalizeChamberDoor({ ...chamber, doorWall, doorOffsetMm }) : chamber
+            )
+          )
+          setDoorEditorOpen(false)
+          setStatusMessage('Положение двери изменено')
+        }}
       />
     </div>
   )

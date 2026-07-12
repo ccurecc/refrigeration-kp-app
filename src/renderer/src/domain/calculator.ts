@@ -7,6 +7,7 @@ export type PanelFilling = 'PIR' | 'PUR' | 'PPS' | 'custom'
 export type ProposalMode = 'detailed' | 'compact'
 export type DoorType = 'single' | 'double' | 'sliding'
 export type SlideSide = 'left' | 'right'
+export type DoorWall = 'front' | 'right' | 'back' | 'left'
 
 export const doorTypeLabels: Record<DoorType, string> = {
   single: 'распашная одностворчатая',
@@ -38,6 +39,8 @@ export interface ChamberInput {
   doorHasThreshold: boolean
   doorWidthMm: number
   doorHeightMm: number
+  doorWall: DoorWall
+  doorOffsetMm: number
   doorPrice: number
   doorMountingPrice: number
   equipmentEnabled: boolean
@@ -727,6 +730,8 @@ export const defaultChamberInput: ChamberInput = {
   doorHasThreshold: true,
   doorWidthMm: 1200,
   doorHeightMm: 2000,
+  doorWall: 'front',
+  doorOffsetMm: 0,
   doorPrice: 0,
   doorMountingPrice: 0,
   equipmentEnabled: false,

@@ -1,4 +1,4 @@
-import { PANEL_WORKING_WIDTH_MM } from './calculator'
+import { PANEL_WORKING_WIDTH_MM, type DoorWall } from './calculator'
 
 const CUT_EPSILON_MM = 1
 
@@ -23,6 +23,26 @@ export interface CenteredDoorSpan {
   widthMm: number
 }
 
+export interface DoorPlacementParams {
+  lengthMm: number
+  widthMm: number
+  thicknessMm: number
+  doorWidthMm: number
+  doorWall?: DoorWall | string
+  doorOffsetMm?: number
+}
+
+export interface DoorPlacement extends CenteredDoorSpan {
+  wall: DoorWall
+  wallSpanMm: number
+  availableStartMm: number
+  availableEndMm: number
+  availableSpanMm: number
+  offsetMm: number
+  startDistanceMm: number
+  endDistanceMm: number
+}
+
 export interface ChamberPanelRuns {
   floor: PanelRun | null
   floorSpanMm: number
@@ -32,6 +52,51 @@ export interface ChamberPanelRuns {
 }
 
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max)
+
+const DOOR_WALLS: DoorWall[] = ['front', 'right', 'back', 'left']
+
+export function isDoorWall(value: unknown): value is DoorWall {
+  return typeof value === 'string' && DOOR_WALLS.includes(value as DoorWall)
+}
+
+/**
+ * Resolves a door opening against the normalized plan (long side is horizontal).
+ * The opening is kept clear of both corner joints by one panel thickness.
+ * `doorOffsetMm` is the centre offset from the usable wall centre.
+ */
+export function normalizeDoorPlacement(params: DoorPlacementParams): DoorPlacement {
+  const longMm = Math.max(Number.isFinite(params.lengthMm) ? params.lengthMm : 0, Number.isFinite(params.widthMm) ? params.widthMm : 0, 0)
+  const shortMm = Math.max(Math.min(Number.isFinite(params.lengthMm) ? params.lengthMm : 0, Number.isFinite(params.widthMm) ? params.widthMm : 0), 0)
+  const wall = isDoorWall(params.doorWall) ? params.doorWall : 'front'
+  const wallSpanMm = wall === 'front' || wall === 'back' ? longMm : shortMm
+  const safeThicknessMm = clamp(Number.isFinite(params.thicknessMm) ? params.thicknessMm : 0, 0, wallSpanMm / 2)
+  const availableStartMm = safeThicknessMm
+  const availableEndMm = Math.max(availableStartMm, wallSpanMm - safeThicknessMm)
+  const availableSpanMm = Math.max(0, availableEndMm - availableStartMm)
+  const requestedWidthMm = Number.isFinite(params.doorWidthMm) ? Math.max(params.doorWidthMm, 0) : 0
+  const widthMm = Math.min(requestedWidthMm, availableSpanMm)
+  const maxOffsetMm = Math.max(0, (availableSpanMm - widthMm) / 2)
+  const requestedOffsetMm = Number.isFinite(params.doorOffsetMm) ? (params.doorOffsetMm ?? 0) : 0
+  const offsetMm = clamp(requestedOffsetMm, -maxOffsetMm, maxOffsetMm)
+  const centerMm = wallSpanMm / 2 + offsetMm
+  const leftMm = centerMm - widthMm / 2
+  const rightMm = centerMm + widthMm / 2
+
+  return {
+    wall,
+    wallSpanMm,
+    availableStartMm,
+    availableEndMm,
+    availableSpanMm,
+    centerMm,
+    leftMm,
+    rightMm,
+    widthMm,
+    offsetMm,
+    startDistanceMm: leftMm,
+    endDistanceMm: Math.max(0, wallSpanMm - rightMm)
+  }
+}
 
 export function buildPanelRun(spanMm: number): PanelRun {
   const safeSpanMm = Math.max(spanMm, 0)
@@ -72,22 +137,5 @@ export function buildChamberPanelRuns(
     longWall: buildPanelRun(longMm),
     shortWall: buildPanelRun(shortWallSpanMm),
     shortWallSpanMm
-  }
-}
-
-export function buildCenteredDoorSpan(wallSpanMm: number, requestedWidthMm: number): CenteredDoorSpan {
-  const safeWallSpanMm = Math.max(wallSpanMm, 0)
-  const marginMm = Math.min(450, safeWallSpanMm * 0.08)
-  const maxWidthMm = Math.max(0, safeWallSpanMm - marginMm * 2)
-  const minWidthMm = Math.min(250, maxWidthMm)
-  const widthMm = clamp(requestedWidthMm, minWidthMm, maxWidthMm)
-  const centerMm = safeWallSpanMm / 2
-  const leftMm = centerMm - widthMm / 2
-
-  return {
-    centerMm,
-    leftMm,
-    rightMm: leftMm + widthMm,
-    widthMm
   }
 }

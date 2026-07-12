@@ -337,6 +337,8 @@ export function buildProposalHtml({
 function topViewSvg(input: ChamberInput, result: ChamberResult): string {
   const model = buildTopView({
     doorWidthMm: input.doorWidthMm,
+    doorWall: input.doorWall,
+    doorOffsetMm: input.doorOffsetMm,
     hasPanelFloor: input.hasPanelFloor,
     longMm: result.longSideMm,
     shortMm: result.shortSideMm,

@@ -1,5 +1,5 @@
-import { PANEL_WORKING_WIDTH_MM } from './calculator'
-import { buildCenteredDoorSpan, buildChamberPanelRuns, buildPanelRun } from './chamberGeometry'
+import { PANEL_WORKING_WIDTH_MM, type DoorWall } from './calculator'
+import { buildChamberPanelRuns, buildPanelRun, normalizeDoorPlacement } from './chamberGeometry'
 
 export type TopShape =
   | { k: 'rect'; x: number; y: number; w: number; h: number; fill?: string; stroke?: string; sw?: number }
@@ -30,6 +30,8 @@ export interface TopViewParams {
   thicknessMm: number
   hasPanelFloor: boolean
   doorWidthMm: number
+  doorWall?: DoorWall
+  doorOffsetMm?: number
 }
 
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max)
@@ -67,7 +69,7 @@ const ARROW = 7
  *   - centre-left   → the chamber itself
  */
 export function buildTopView(params: TopViewParams): TopViewModel {
-  const { longMm, shortMm, thicknessMm, hasPanelFloor, doorWidthMm } = params
+  const { longMm, shortMm, thicknessMm, hasPanelFloor, doorWidthMm, doorWall, doorOffsetMm } = params
 
   const width = 900
   const height = 470
@@ -244,13 +246,34 @@ export function buildTopView(params: TopViewParams): TopViewModel {
   extAngle(x0, y1, 1, -1)
   extAngle(x1, y1, -1, -1)
 
-  // Door opening + channel on the front wall.
-  const door = buildCenteredDoorSpan(longMm, doorWidthMm)
+  // Door opening + channel. The same normalized span is used by the editor,
+  // Three.js model and PDF renderers.
+  const door = normalizeDoorPlacement({
+    lengthMm: longMm,
+    widthMm: shortMm,
+    thicknessMm,
+    doorWidthMm,
+    doorWall,
+    doorOffsetMm
+  })
   const doorW = door.widthMm * scale
-  const dx = bottomWall.x + door.leftMm * scale
-  shapes.push({ k: 'rect', x: dx, y: bottomWall.y, w: doorW, h: bottomWall.h, fill: COLORS.door, stroke: COLORS.wallStroke, sw: 1 })
-  shapes.push({ k: 'rect', x: dx - el, y: bottomWall.y, w: el, h: bottomWall.h, fill: COLORS.channel })
-  shapes.push({ k: 'rect', x: dx + doorW, y: bottomWall.y, w: el, h: bottomWall.h, fill: COLORS.channel })
+  const doorOffsetPx = door.leftMm * scale
+  const doorRect =
+    door.wall === 'front'
+      ? { x: bottomWall.x + doorOffsetPx, y: bottomWall.y, w: doorW, h: bottomWall.h }
+      : door.wall === 'back'
+        ? { x: topWall.x + doorOffsetPx, y: topWall.y, w: doorW, h: topWall.h }
+        : door.wall === 'left'
+          ? { x: leftWall.x, y: y0 + doorOffsetPx, w: leftWall.w, h: doorW }
+          : { x: rightWall.x, y: y0 + doorOffsetPx, w: rightWall.w, h: doorW }
+  shapes.push({ k: 'rect', ...doorRect, fill: COLORS.door, stroke: COLORS.wallStroke, sw: 1 })
+  if (door.wall === 'front' || door.wall === 'back') {
+    shapes.push({ k: 'rect', x: doorRect.x - el, y: doorRect.y, w: el, h: doorRect.h, fill: COLORS.channel })
+    shapes.push({ k: 'rect', x: doorRect.x + doorRect.w, y: doorRect.y, w: el, h: doorRect.h, fill: COLORS.channel })
+  } else {
+    shapes.push({ k: 'rect', x: doorRect.x, y: doorRect.y - el, w: doorRect.w, h: el, fill: COLORS.channel })
+    shapes.push({ k: 'rect', x: doorRect.x, y: doorRect.y + doorRect.h, w: doorRect.w, h: el, fill: COLORS.channel })
+  }
 
   // ---- Cut-panel dimensions -------------------------------------------------
   // Labels do not sit inside the narrow wall strips. Each one is attached to
@@ -269,7 +292,7 @@ export function buildTopView(params: TopViewParams): TopViewModel {
     { x: width - legendW, y: padTop - 18, w: legendW, h: height - padTop + 18 },
     { x: (x0 + x1) / 2 - 48, y: y1 + 29, w: 96, h: 26 },
     { x: x0 - 59, y: (y0 + y1) / 2 - 48, w: 26, h: 96 },
-    { x: dx - 8, y: bottomWall.y - 7, w: doorW + el * 2 + 16, h: bottomWall.h + 14 }
+    { x: doorRect.x - 8, y: doorRect.y - 8, w: doorRect.w + 16, h: doorRect.h + 16 }
   ]
 
   const overlaps = (a: LabelBox, b: LabelBox, gap = 4): boolean =>

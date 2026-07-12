@@ -1,5 +1,5 @@
-import type { ChamberInput, ChamberResult } from './calculator'
-import { buildCenteredDoorSpan, buildChamberPanelRuns } from './chamberGeometry'
+import type { ChamberInput, ChamberResult, DoorWall } from './calculator'
+import { buildChamberPanelRuns, normalizeDoorPlacement } from './chamberGeometry'
 
 interface Point {
   x: number
@@ -54,28 +54,71 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
   const floorLongMm = Math.max(0, longMm - 2 * thicknessMm)
   const floorShortMm = Math.max(0, shortMm - 2 * thicknessMm)
   const panelRuns = buildChamberPanelRuns(longMm, shortMm, thicknessMm, input.hasPanelFloor)
+  const doorSpan = normalizeDoorPlacement(input)
+  const isSideFront = doorSpan.wall === 'left' || doorSpan.wall === 'right'
+  const viewFrontMm = isSideFront ? shortMm : longMm
+  const viewDepthMm = isSideFront ? longMm : shortMm
 
   const width = 900
   const height = 430
   const depthX = 0.36
   const depthY = 0.22
-  const scale = Math.min(560 / (longMm + shortMm * depthX), 265 / (heightMm + shortMm * depthY))
+  const scale = Math.min(560 / (viewFrontMm + viewDepthMm * depthX), 265 / (heightMm + viewDepthMm * depthY))
   const ox = 82
   const oy = 354
 
-  const p = (x: number, y: number, z: number): Point => ({
-    x: ox + (longMm - x + z * depthX) * scale,
-    y: oy - (y + z * depthY) * scale
-  })
+  const orient = (x: number, z: number): { x: number; z: number } => {
+    if (doorSpan.wall === 'back') return { x: longMm - x, z: shortMm - z }
+    if (doorSpan.wall === 'left') return { x: shortMm - z, z: x }
+    if (doorSpan.wall === 'right') return { x: z, z: longMm - x }
+    return { x, z }
+  }
+  const p = (x: number, y: number, z: number): Point => {
+    const oriented = orient(x, z)
+    return {
+      x: ox + (viewFrontMm - oriented.x + oriented.z * depthX) * scale,
+      y: oy - (y + oriented.z * depthY) * scale
+    }
+  }
+  const dp = (alongMm: number, y: number, outwardMm: number): Point => {
+    if (doorSpan.wall === 'back') return p(alongMm, y, shortMm + outwardMm)
+    if (doorSpan.wall === 'left') return p(-outwardMm, y, shortMm - alongMm)
+    if (doorSpan.wall === 'right') return p(longMm + outwardMm, y, shortMm - alongMm)
+    return p(alongMm, y, -outwardMm)
+  }
 
-  const doorSpan = buildCenteredDoorSpan(longMm, input.doorWidthMm)
   const doorWidthMm = doorSpan.widthMm
   const doorHeightMm = Math.min(input.doorHeightMm, wallHeightMm)
   const doorLeftMm = doorSpan.leftMm
   const doorRightMm = doorSpan.rightMm
-  const frontWall = [p(0, 0, 0), p(longMm, 0, 0), p(longMm, wallHeightMm, 0), p(0, wallHeightMm, 0)]
-  const rightWall = [p(longMm, 0, 0), p(longMm, 0, shortMm), p(longMm, wallHeightMm, shortMm), p(longMm, wallHeightMm, 0)]
-  const backWall = [p(0, 0, shortMm), p(longMm, 0, shortMm), p(longMm, wallHeightMm, shortMm), p(0, wallHeightMm, shortMm)]
+  const physicalFrontWall = [p(0, 0, 0), p(longMm, 0, 0), p(longMm, wallHeightMm, 0), p(0, wallHeightMm, 0)]
+  const physicalRightWall = [p(longMm, 0, 0), p(longMm, 0, shortMm), p(longMm, wallHeightMm, shortMm), p(longMm, wallHeightMm, 0)]
+  const physicalBackWall = [p(0, 0, shortMm), p(longMm, 0, shortMm), p(longMm, wallHeightMm, shortMm), p(0, wallHeightMm, shortMm)]
+  const physicalLeftWall = [p(0, 0, shortMm), p(0, 0, 0), p(0, wallHeightMm, 0), p(0, wallHeightMm, shortMm)]
+  const frontWall =
+    doorSpan.wall === 'back'
+      ? physicalBackWall
+      : doorSpan.wall === 'left'
+        ? physicalLeftWall
+        : doorSpan.wall === 'right'
+          ? physicalRightWall
+          : physicalFrontWall
+  const rightWall =
+    doorSpan.wall === 'back'
+      ? physicalLeftWall
+      : doorSpan.wall === 'left'
+        ? physicalFrontWall
+        : doorSpan.wall === 'right'
+          ? physicalBackWall
+          : physicalRightWall
+  const backWall =
+    doorSpan.wall === 'back'
+      ? physicalFrontWall
+      : doorSpan.wall === 'left'
+        ? physicalRightWall
+        : doorSpan.wall === 'right'
+          ? physicalLeftWall
+          : physicalBackWall
   const floor = [
     p(thicknessMm, thicknessMm, thicknessMm),
     p(thicknessMm + floorLongMm, thicknessMm, thicknessMm),
@@ -83,8 +126,8 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
     p(thicknessMm, thicknessMm, thicknessMm + floorShortMm)
   ]
   const ceiling = [p(0, heightMm, 0), p(longMm, heightMm, 0), p(longMm, heightMm, shortMm), p(0, heightMm, shortMm)]
-  const door = [p(doorLeftMm, 0, -35), p(doorRightMm, 0, -35), p(doorRightMm, doorHeightMm, -35), p(doorLeftMm, doorHeightMm, -35)]
-  const frontCut = panelRuns.longWall.hasCut
+  const door = [dp(doorLeftMm, 0, 35), dp(doorRightMm, 0, 35), dp(doorRightMm, doorHeightMm, 35), dp(doorLeftMm, doorHeightMm, 35)]
+  const physicalFrontCut = panelRuns.longWall.hasCut
     ? [
         p(longMm - panelRuns.longWall.remainderMm, 0, -12),
         p(longMm, 0, -12),
@@ -92,9 +135,17 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
         p(longMm - panelRuns.longWall.remainderMm, wallHeightMm, -12)
       ]
     : null
+  const physicalBackCut = panelRuns.longWall.hasCut
+    ? [
+        p(longMm - panelRuns.longWall.remainderMm, 0, shortMm + 12),
+        p(longMm, 0, shortMm + 12),
+        p(longMm, wallHeightMm, shortMm + 12),
+        p(longMm - panelRuns.longWall.remainderMm, wallHeightMm, shortMm + 12)
+      ]
+    : null
   const shortCutStartMm = shortMm - thicknessMm - panelRuns.shortWall.remainderMm
   const shortCutEndMm = shortMm - thicknessMm
-  const rightCut = panelRuns.shortWall.hasCut
+  const physicalRightCut = panelRuns.shortWall.hasCut
     ? [
         p(longMm, 0, shortCutStartMm),
         p(longMm, 0, shortCutEndMm),
@@ -102,6 +153,30 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
         p(longMm, wallHeightMm, shortCutStartMm)
       ]
     : null
+  const physicalLeftCut = panelRuns.shortWall.hasCut
+    ? [
+        p(-12, 0, shortCutStartMm),
+        p(-12, 0, shortCutEndMm),
+        p(-12, wallHeightMm, shortCutEndMm),
+        p(-12, wallHeightMm, shortCutStartMm)
+      ]
+    : null
+  const frontCut =
+    doorSpan.wall === 'back'
+      ? physicalBackCut
+      : doorSpan.wall === 'left'
+        ? physicalLeftCut
+        : doorSpan.wall === 'right'
+          ? physicalRightCut
+          : physicalFrontCut
+  const rightCut =
+    doorSpan.wall === 'back'
+      ? physicalLeftCut
+      : doorSpan.wall === 'left'
+        ? physicalFrontCut
+        : doorSpan.wall === 'right'
+          ? physicalBackCut
+          : physicalRightCut
   const floorCutStartMm = thicknessMm + floorLongMm - (panelRuns.floor?.remainderMm ?? 0)
   const floorCutEndMm = thicknessMm + floorLongMm
   const floorCut = panelRuns.floor?.hasCut
@@ -115,8 +190,16 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
 
   const panelStep = 1190
   const frontSeams: string[] = []
-  for (let x = panelStep; x < longMm; x += panelStep) {
-    frontSeams.push(line(p(x, 0, -10), p(x, wallHeightMm, -10), 'seam-line'))
+  if (doorSpan.wall === 'front' || doorSpan.wall === 'back') {
+    const z = doorSpan.wall === 'front' ? -10 : shortMm + 10
+    for (let x = panelStep; x < longMm; x += panelStep) {
+      frontSeams.push(line(p(x, 0, z), p(x, wallHeightMm, z), 'seam-line'))
+    }
+  } else {
+    const x = doorSpan.wall === 'left' ? -10 : longMm + 10
+    for (let z = thicknessMm + panelStep; z < shortMm - thicknessMm; z += panelStep) {
+      frontSeams.push(line(p(x, 0, z), p(x, wallHeightMm, z), 'seam-line'))
+    }
   }
 
   const floorSeams: string[] = []
@@ -148,41 +231,41 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
     { x: 46, y: 4 }
   )
   const doorWidthDim = dim(
-    p(doorLeftMm, doorHeightMm + 180, -90),
-    p(doorRightMm, doorHeightMm + 180, -90),
+    dp(doorLeftMm, doorHeightMm + 180, 90),
+    dp(doorRightMm, doorHeightMm + 180, 90),
     `Ширина двери ${fmt(input.doorWidthMm)}`,
     { x: 0, y: -10 }
   )
   const doorHeightDim = dim(
-    p(doorRightMm + 210, 0, -90),
-    p(doorRightMm + 210, doorHeightMm, -90),
+    dp(doorRightMm + 210, 0, 90),
+    dp(doorRightMm + 210, doorHeightMm, 90),
     `Высота двери ${fmt(input.doorHeightMm)}`,
     { x: 54, y: 4 }
   )
   const doorCenterMm = (doorLeftMm + doorRightMm) / 2
   const doorHandleX = input.doorType === 'double' ? doorCenterMm - doorWidthMm * 0.075 : doorCenterMm + doorWidthMm * 0.34
-  const doorHandle = p(doorHandleX, doorHeightMm * 0.52, -82)
+  const doorHandle = dp(doorHandleX, doorHeightMm * 0.52, 82)
   const doorHandleSvg = `<circle cx="${doorHandle.x.toFixed(1)}" cy="${doorHandle.y.toFixed(1)}" r="5" fill="#124837" stroke="#0b3327" stroke-width="1.5" />`
   const doorWindowWidthMm = doorWidthMm * 0.23
   const doorWindowHeightMm = doorHeightMm * 0.13
   const doorWindowCenterMm = doorCenterMm - doorWidthMm * 0.18
   const doorWindowBottomMm = doorHeightMm * 0.72 - doorWindowHeightMm / 2
   const doorWindow = [
-    p(doorWindowCenterMm - doorWindowWidthMm / 2, doorWindowBottomMm, -56),
-    p(doorWindowCenterMm + doorWindowWidthMm / 2, doorWindowBottomMm, -56),
-    p(doorWindowCenterMm + doorWindowWidthMm / 2, doorWindowBottomMm + doorWindowHeightMm, -56),
-    p(doorWindowCenterMm - doorWindowWidthMm / 2, doorWindowBottomMm + doorWindowHeightMm, -56)
+    dp(doorWindowCenterMm - doorWindowWidthMm / 2, doorWindowBottomMm, 56),
+    dp(doorWindowCenterMm + doorWindowWidthMm / 2, doorWindowBottomMm, 56),
+    dp(doorWindowCenterMm + doorWindowWidthMm / 2, doorWindowBottomMm + doorWindowHeightMm, 56),
+    dp(doorWindowCenterMm - doorWindowWidthMm / 2, doorWindowBottomMm + doorWindowHeightMm, 56)
   ]
   const doubleDoorDetails =
     input.doorType === 'double'
-      ? `${line(p(doorCenterMm, 0, -48), p(doorCenterMm, doorHeightMm, -48), 'door-leaf-seam')}${doorHandleSvg}`
+      ? `${line(dp(doorCenterMm, 0, 48), dp(doorCenterMm, doorHeightMm, 48), 'door-leaf-seam')}${doorHandleSvg}`
       : ''
   const slidingRailInsetMm = Math.min(Math.max(doorHeightMm * 0.025, 20), doorHeightMm / 2)
   const detailedSlidingRail = (railY: number): string => {
-    const start = p(doorLeftMm, railY, -68)
-    const end = p(doorRightMm, railY, -68)
-    const leftBolt = p(doorLeftMm + doorWidthMm * 0.3, railY, -78)
-    const rightBolt = p(doorRightMm - doorWidthMm * 0.3, railY, -78)
+    const start = dp(doorLeftMm, railY, 68)
+    const end = dp(doorRightMm, railY, 68)
+    const leftBolt = dp(doorLeftMm + doorWidthMm * 0.3, railY, 78)
+    const rightBolt = dp(doorRightMm - doorWidthMm * 0.3, railY, 78)
 
     return `${line(start, end, 'door-rail')}${line(start, end, 'door-rail-highlight')}<circle cx="${leftBolt.x.toFixed(1)}" cy="${leftBolt.y.toFixed(1)}" r="2.7" class="door-rail-bolt" /><circle cx="${rightBolt.x.toFixed(1)}" cy="${rightBolt.y.toFixed(1)}" r="2.7" class="door-rail-bolt" />`
   }
@@ -194,24 +277,37 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
       : ''
   const singleDoorDetails =
     input.doorType === 'single' ? `${polygon(doorWindow, '#bfd9e5', '#52788b', 0.9)}${doorHandleSvg}` : ''
-  const longWallCutDim = panelRuns.longWall.hasCut
-    ? cutDim(
-        p(longMm - panelRuns.longWall.remainderMm, wallHeightMm * 0.63, -28),
-        p(longMm, wallHeightMm * 0.63, -28),
+  const adjacentRightWall: Record<DoorWall, DoorWall> = {
+    front: 'right',
+    right: 'back',
+    back: 'left',
+    left: 'front'
+  }
+  const wallCutDim = (wall: DoorWall, frontFace: boolean): string => {
+    const y = wallHeightMm * (frontFace ? 0.63 : 0.58)
+    if (wall === 'front' || wall === 'back') {
+      if (!panelRuns.longWall.hasCut) return ''
+      const z = wall === 'front' ? -28 : shortMm + 28
+      return cutDim(
+        p(longMm - panelRuns.longWall.remainderMm, y, z),
+        p(longMm, y, z),
         fmt(panelRuns.longWall.remainderMm),
-        { x: 0, y: -12 },
-        { x: 0, y: -12 }
+        { x: 0, y: frontFace ? -12 : 8 },
+        { x: 0, y: -10 }
       )
-    : ''
-  const shortWallCutDim = panelRuns.shortWall.hasCut
-    ? cutDim(
-        p(longMm + 35, wallHeightMm * 0.58, shortCutStartMm),
-        p(longMm + 35, wallHeightMm * 0.58, shortCutEndMm),
-        fmt(panelRuns.shortWall.remainderMm),
-        { x: 18, y: 0 },
-        { x: 30, y: -10 }
-      )
-    : ''
+    }
+    if (!panelRuns.shortWall.hasCut) return ''
+    const x = wall === 'left' ? -28 : longMm + 28
+    return cutDim(
+      p(x, y, shortCutStartMm),
+      p(x, y, shortCutEndMm),
+      fmt(panelRuns.shortWall.remainderMm),
+      { x: frontFace ? 0 : 14, y: frontFace ? -12 : 0 },
+      { x: frontFace ? 0 : 24, y: -10 }
+    )
+  }
+  const longWallCutDim = wallCutDim(doorSpan.wall, true)
+  const shortWallCutDim = wallCutDim(adjacentRightWall[doorSpan.wall], false)
   const floorCutDim = panelRuns.floor?.hasCut
     ? cutDim(
         p(floorCutStartMm, thicknessMm + 25, thicknessMm + floorShortMm * 0.45),
@@ -254,7 +350,7 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
       ${polygon(ceiling, '#ffffff', '#234f6c', 0.96)}
       ${roofSeams.join('')}
       ${polygon(door, '#f6f8f9', '#a64a3c', 1)}
-      <polyline points="${pointsToString([p(doorLeftMm, 0, -45), p(doorLeftMm, doorHeightMm, -45), p(doorRightMm, doorHeightMm, -45), p(doorRightMm, 0, -45)])}" fill="none" stroke="#a64a3c" stroke-width="4" />
+      <polyline points="${pointsToString([dp(doorLeftMm, 0, 45), dp(doorLeftMm, doorHeightMm, 45), dp(doorRightMm, doorHeightMm, 45), dp(doorRightMm, 0, 45)])}" fill="none" stroke="#a64a3c" stroke-width="4" />
       ${singleDoorDetails}
       ${doubleDoorDetails}
       ${slidingDoorDetails}
