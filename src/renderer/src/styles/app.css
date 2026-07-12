@@ -455,6 +455,15 @@ input:disabled {
   font-weight: 700;
 }
 
+.segmented-control.three-options {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.segmented-control.three-options button {
+  padding-inline: 6px;
+  font-size: 12px;
+}
+
 /* ---------- Optimizer ---------- */
 .optimizer {
   padding: 12px;

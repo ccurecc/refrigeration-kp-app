@@ -729,7 +729,7 @@ export function App(): JSX.Element {
             </label>
             <div className="field-label-block">
               <span className="field-label">Тип двери</span>
-              <div className="segmented-control">
+              <div className="segmented-control three-options">
                 {(['single', 'double', 'sliding'] as const).map((type) => (
                   <button
                     key={type}
@@ -737,7 +737,7 @@ export function App(): JSX.Element {
                     className={activeChamber.doorType === type ? 'active' : undefined}
                     onClick={() => updateActive('doorType', type)}
                   >
-                    {type === 'single' ? 'Распашная' : type === 'double' ? 'Двухстворчатая' : 'Откатная'}
+                    {type === 'single' ? 'Одностворчатая' : type === 'double' ? 'Двустворчатая' : 'Откатная'}
                   </button>
                 ))}
               </div>

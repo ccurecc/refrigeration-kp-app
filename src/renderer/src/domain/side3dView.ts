@@ -159,6 +159,41 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
     `Высота двери ${fmt(input.doorHeightMm)}`,
     { x: 54, y: 4 }
   )
+  const doorCenterMm = (doorLeftMm + doorRightMm) / 2
+  const doorHandleX = input.doorType === 'double' ? doorCenterMm - doorWidthMm * 0.075 : doorCenterMm + doorWidthMm * 0.34
+  const doorHandle = p(doorHandleX, doorHeightMm * 0.52, -82)
+  const doorHandleSvg = `<circle cx="${doorHandle.x.toFixed(1)}" cy="${doorHandle.y.toFixed(1)}" r="5" fill="#124837" stroke="#0b3327" stroke-width="1.5" />`
+  const doorWindowWidthMm = doorWidthMm * 0.23
+  const doorWindowHeightMm = doorHeightMm * 0.13
+  const doorWindowCenterMm = doorCenterMm - doorWidthMm * 0.18
+  const doorWindowBottomMm = doorHeightMm * 0.72 - doorWindowHeightMm / 2
+  const doorWindow = [
+    p(doorWindowCenterMm - doorWindowWidthMm / 2, doorWindowBottomMm, -56),
+    p(doorWindowCenterMm + doorWindowWidthMm / 2, doorWindowBottomMm, -56),
+    p(doorWindowCenterMm + doorWindowWidthMm / 2, doorWindowBottomMm + doorWindowHeightMm, -56),
+    p(doorWindowCenterMm - doorWindowWidthMm / 2, doorWindowBottomMm + doorWindowHeightMm, -56)
+  ]
+  const doubleDoorDetails =
+    input.doorType === 'double'
+      ? `${line(p(doorCenterMm, 0, -48), p(doorCenterMm, doorHeightMm, -48), 'door-leaf-seam')}${doorHandleSvg}`
+      : ''
+  const slidingRailInsetMm = Math.min(Math.max(doorHeightMm * 0.025, 20), doorHeightMm / 2)
+  const detailedSlidingRail = (railY: number): string => {
+    const start = p(doorLeftMm, railY, -68)
+    const end = p(doorRightMm, railY, -68)
+    const leftBolt = p(doorLeftMm + doorWidthMm * 0.3, railY, -78)
+    const rightBolt = p(doorRightMm - doorWidthMm * 0.3, railY, -78)
+
+    return `${line(start, end, 'door-rail')}${line(start, end, 'door-rail-highlight')}<circle cx="${leftBolt.x.toFixed(1)}" cy="${leftBolt.y.toFixed(1)}" r="2.7" class="door-rail-bolt" /><circle cx="${rightBolt.x.toFixed(1)}" cy="${rightBolt.y.toFixed(1)}" r="2.7" class="door-rail-bolt" />`
+  }
+  const slidingDoorDetails =
+    input.doorType === 'sliding'
+      ? `${detailedSlidingRail(slidingRailInsetMm)}${detailedSlidingRail(
+          doorHeightMm + slidingRailInsetMm
+        )}${doorHandleSvg}`
+      : ''
+  const singleDoorDetails =
+    input.doorType === 'single' ? `${polygon(doorWindow, '#bfd9e5', '#52788b', 0.9)}${doorHandleSvg}` : ''
   const longWallCutDim = panelRuns.longWall.hasCut
     ? cutDim(
         p(longMm - panelRuns.longWall.remainderMm, wallHeightMm * 0.63, -28),
@@ -200,6 +235,10 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
         .cut-extension { stroke: #9a4f12; stroke-width: 1; stroke-dasharray: 3 3; }
         .seam-line { stroke: #8a9096; stroke-width: 1; }
         .floor-seam { stroke: #a8a39a; stroke-width: 1; }
+        .door-leaf-seam { stroke: #a64a3c; stroke-width: 2; }
+        .door-rail { stroke: #4c5961; stroke-width: 12; stroke-linecap: square; }
+        .door-rail-highlight { stroke: #b9c2c7; stroke-width: 3; stroke-linecap: square; }
+        .door-rail-bolt { fill: #124837; stroke: #e7ecef; stroke-width: 1; }
         .dim-text { font: 700 13px Arial, sans-serif; fill: #163246; stroke: #fff; stroke-width: 4px; paint-order: stroke; }
       </style>
       <rect width="${width}" height="${height}" fill="#eef2f5" />
@@ -216,6 +255,9 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
       ${roofSeams.join('')}
       ${polygon(door, '#f6f8f9', '#a64a3c', 1)}
       <polyline points="${pointsToString([p(doorLeftMm, 0, -45), p(doorLeftMm, doorHeightMm, -45), p(doorRightMm, doorHeightMm, -45), p(doorRightMm, 0, -45)])}" fill="none" stroke="#a64a3c" stroke-width="4" />
+      ${singleDoorDetails}
+      ${doubleDoorDetails}
+      ${slidingDoorDetails}
       ${lengthDim}
       ${widthDim}
       ${heightDim}

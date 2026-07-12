@@ -930,6 +930,8 @@ function addDoor(
   doorMaterial: THREE.Material,
   frameMaterial: THREE.Material,
   glassMaterial: THREE.Material,
+  railMaterial: THREE.Material,
+  railAccentMaterial: THREE.Material,
   handleMaterial: THREE.Material
 ): void {
   const doorSpan = buildCenteredDoorSpan(metrics.lengthMm, input.doorWidthMm)
@@ -941,14 +943,59 @@ function addDoor(
   const doorCenterY = doorBottomY + doorHeightM / 2
   const frontSurfaceZ = -metrics.widthM / 2 - 0.048
   const frameW = 0.055
+  const leafDepthM = 0.05
+  const leafWidthM = doorWidthM * 0.93
+  const leafHeightM = doorHeightM * 0.95
+  const handleRadiusM = clamp(doorWidthM * 0.018, 0.026, 0.04)
+  const addHandle = (x: number): void => {
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(handleRadiusM, handleRadiusM, 0.09, 24), handleMaterial)
+    handle.rotation.x = Math.PI / 2
+    handle.position.set(x, doorBottomY + doorHeightM * 0.52, frontSurfaceZ - 0.08)
+    group.add(handle)
+  }
 
-  addBox(
-    group,
-    new THREE.Vector3(doorWidthM * 0.93, doorHeightM * 0.95, 0.05),
-    new THREE.Vector3(doorCenterX, doorCenterY, frontSurfaceZ),
-    doorMaterial,
-    frameMaterial
-  )
+  if (input.doorType === 'double') {
+    const leafGapM = clamp(doorWidthM * 0.008, 0.01, 0.024)
+    const doubleLeafWidthM = (leafWidthM - leafGapM) / 2
+    const leafOffsetX = (doubleLeafWidthM + leafGapM) / 2
+
+    addBox(
+      group,
+      new THREE.Vector3(doubleLeafWidthM, leafHeightM, leafDepthM),
+      new THREE.Vector3(doorCenterX - leafOffsetX, doorCenterY, frontSurfaceZ),
+      doorMaterial,
+      frameMaterial
+    )
+    addBox(
+      group,
+      new THREE.Vector3(doubleLeafWidthM, leafHeightM, leafDepthM),
+      new THREE.Vector3(doorCenterX + leafOffsetX, doorCenterY, frontSurfaceZ),
+      doorMaterial,
+      frameMaterial
+    )
+
+    // The handle belongs to the right leaf and sits next to the meeting stile.
+    addHandle(doorCenterX - doorWidthM * 0.075)
+  } else {
+    addBox(
+      group,
+      new THREE.Vector3(leafWidthM, leafHeightM, leafDepthM),
+      new THREE.Vector3(doorCenterX, doorCenterY, frontSurfaceZ),
+      doorMaterial,
+      frameMaterial
+    )
+
+    addHandle(doorCenterX + doorWidthM * 0.34)
+
+    if (input.doorType === 'single') {
+      addBox(
+        group,
+        new THREE.Vector3(doorWidthM * 0.23, doorHeightM * 0.13, 0.018),
+        new THREE.Vector3(doorCenterX - doorWidthM * 0.18, doorBottomY + doorHeightM * 0.72, frontSurfaceZ - 0.034),
+        glassMaterial
+      )
+    }
+  }
 
   addBox(
     group,
@@ -978,17 +1025,70 @@ function addDoor(
     )
   }
 
-  addBox(
-    group,
-    new THREE.Vector3(doorWidthM * 0.23, doorHeightM * 0.13, 0.018),
-    new THREE.Vector3(doorCenterX - doorWidthM * 0.18, doorBottomY + doorHeightM * 0.72, frontSurfaceZ - 0.034),
-    glassMaterial
-  )
+  if (input.doorType === 'sliding') {
+    const railHeightM = clamp(doorHeightM * 0.035, 0.065, 0.085)
+    const railDepthM = 0.115
+    const railLipHeightM = clamp(railHeightM * 0.2, 0.014, 0.018)
+    const railLipDepthM = railDepthM + 0.035
+    const railAccentHeightM = railHeightM * 0.22
+    const railAccentDepthM = 0.018
+    const railZ = frontSurfaceZ - leafDepthM / 2 - railDepthM / 2 - 0.012
+    const railFrontZ = railZ - railDepthM / 2 - railAccentDepthM / 2 - 0.004
+    const endCapWidthM = clamp(doorWidthM * 0.028, 0.03, 0.05)
+    const boltRadiusM = clamp(railHeightM * 0.15, 0.011, 0.015)
 
-  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.09, 24), handleMaterial)
-  handle.rotation.x = Math.PI / 2
-  handle.position.set(doorCenterX + doorWidthM * 0.34, doorBottomY + doorHeightM * 0.52, frontSurfaceZ - 0.08)
-  group.add(handle)
+    const addRailBolt = (x: number, y: number): void => {
+      const bolt = new THREE.Mesh(new THREE.CylinderGeometry(boltRadiusM, boltRadiusM, 0.024, 20), handleMaterial)
+      bolt.rotation.x = Math.PI / 2
+      bolt.position.set(x, y, railFrontZ - railAccentDepthM / 2 - 0.012)
+      group.add(bolt)
+    }
+
+    const addDetailedRail = (railY: number): void => {
+      // The main body and both lips form a deep U-shaped metal channel.
+      addBox(
+        group,
+        new THREE.Vector3(doorWidthM, railHeightM, railDepthM),
+        new THREE.Vector3(doorCenterX, railY, railZ),
+        railMaterial
+      )
+      for (const lipY of [railY - railHeightM / 2 + railLipHeightM / 2, railY + railHeightM / 2 - railLipHeightM / 2]) {
+        addBox(
+          group,
+          new THREE.Vector3(doorWidthM, railLipHeightM, railLipDepthM),
+          new THREE.Vector3(doorCenterX, lipY, railZ - (railLipDepthM - railDepthM) / 2),
+          railAccentMaterial
+        )
+      }
+
+      // A recessed face strip, inset end caps and visible fasteners make the profile readable at a distance.
+      addBox(
+        group,
+        new THREE.Vector3(doorWidthM - endCapWidthM * 2, railAccentHeightM, railAccentDepthM),
+        new THREE.Vector3(doorCenterX, railY, railFrontZ),
+        railAccentMaterial
+      )
+      for (const capX of [
+        doorCenterX - doorWidthM / 2 + endCapWidthM / 2,
+        doorCenterX + doorWidthM / 2 - endCapWidthM / 2
+      ]) {
+        addBox(
+          group,
+          new THREE.Vector3(endCapWidthM, railHeightM * 0.9, railLipDepthM),
+          new THREE.Vector3(capX, railY, railZ - (railLipDepthM - railDepthM) / 2),
+          railAccentMaterial
+        )
+      }
+      for (const boltX of [doorCenterX - doorWidthM * 0.3, doorCenterX + doorWidthM * 0.3]) {
+        addRailBolt(boltX, railY)
+      }
+    }
+
+    // Both sliding rails follow the selected door width exactly.
+    for (const railY of [doorBottomY + railHeightM / 2, doorBottomY + doorHeightM + railHeightM / 2]) {
+      addDetailedRail(railY)
+    }
+  }
 }
 
 function addWallCuts(
@@ -1253,6 +1353,8 @@ function createChamberModel(input: ChamberInput): {
     transparent: true,
     roughness: 0.2
   })
+  const railMaterial = new THREE.MeshStandardMaterial({ color: 0x4c5961, metalness: 0.62, roughness: 0.3 })
+  const railAccentMaterial = new THREE.MeshStandardMaterial({ color: 0xaeb8bd, metalness: 0.76, roughness: 0.24 })
   const handleMaterial = new THREE.MeshStandardMaterial({ color: 0x124837, metalness: 0.2, roughness: 0.35 })
 
   if (input.hasPanelFloor) {
@@ -1275,7 +1377,7 @@ function createChamberModel(input: ChamberInput): {
 
   addWallPanels(group, metrics, thicknessM, panelMaterial, sidePanelMaterial, wallCutMaterial, seamMaterial, edgeMaterial)
   addDeckSeams(group, metrics, thicknessM, input.hasPanelFloor, seamMaterial, cutMaterial)
-  addDoor(group, input, metrics, doorMaterial, frameMaterial, glassMaterial, handleMaterial)
+  addDoor(group, input, metrics, doorMaterial, frameMaterial, glassMaterial, railMaterial, railAccentMaterial, handleMaterial)
   addDimensions(group, input, metrics, thicknessM)
 
   return { group, metrics, cutDimensions: buildCutDimensionAnchors(input, metrics, thicknessM) }
@@ -1411,11 +1513,13 @@ export function Chamber3DView({ input }: Chamber3DViewProps): JSX.Element {
         input.hasPanelFloor ? 'floor' : 'nofloor',
         input.doorWidthMm,
         input.doorHeightMm,
+        input.doorType,
         input.doorHasThreshold ? 'threshold' : 'nothreshold'
       ].join('-'),
     [
       input.doorHasThreshold,
       input.doorHeightMm,
+      input.doorType,
       input.doorWidthMm,
       input.hasPanelFloor,
       input.heightMm,
@@ -1532,6 +1636,7 @@ export function Chamber3DView({ input }: Chamber3DViewProps): JSX.Element {
   }, [
     input.doorHasThreshold,
     input.doorHeightMm,
+    input.doorType,
     input.doorWidthMm,
     input.hasPanelFloor,
     input.heightMm,
@@ -1568,7 +1673,7 @@ export function Chamber3DView({ input }: Chamber3DViewProps): JSX.Element {
         className="chamber-3d-view"
         data-geometry-key={geometryKey}
         role="img"
-        aria-label={`3D-вид камеры ${input.lengthMm}x${input.widthMm}x${input.heightMm} мм`}
+        aria-label={`3D-вид камеры ${input.lengthMm}x${input.widthMm}x${input.heightMm} мм, дверь: ${input.doorType}`}
       />
       <div className="view-floating-controls">
         <button

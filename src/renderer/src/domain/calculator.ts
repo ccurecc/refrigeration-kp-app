@@ -9,8 +9,8 @@ export type DoorType = 'single' | 'double' | 'sliding'
 export type SlideSide = 'left' | 'right'
 
 export const doorTypeLabels: Record<DoorType, string> = {
-  single: 'одностворчатая распашная',
-  double: 'двухстворчатая',
+  single: 'распашная одностворчатая',
+  double: 'распашная двустворчатая',
   sliding: 'откатная'
 }
 
