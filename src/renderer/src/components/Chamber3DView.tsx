@@ -1214,11 +1214,11 @@ function addDoor(
   const placement = normalizeDoorPlacement(input)
   const doorAssembly = new THREE.Group()
   group.add(doorAssembly)
-  const reverseOffset = placement.wall === 'back' || placement.wall === 'right'
   const maxDoorHeightM = Math.max(0.2, metrics.wallHeightM - 0.08)
   const doorWidthM = placement.widthMm / 1000
   const doorHeightM = clamp(input.doorHeightMm / 1000, 0.3, maxDoorHeightM)
-  const doorCenterX = (placement.offsetMm / 1000) * (reverseOffset ? -1 : 1)
+ const doorCenterX =
+  (placement.offsetMm / 1000) * (placement.wall === 'right' ? 1 : -1)
   const doorBottomY = 0
   const doorCenterY = doorBottomY + doorHeightM / 2
   const frontSurfaceZ = -0.048

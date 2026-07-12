@@ -125,8 +125,9 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
 
   const doorWidthMm = doorSpan.widthMm
   const doorHeightMm = Math.min(input.doorHeightMm, wallHeightMm)
-  const doorLeftMm = doorSpan.leftMm
-  const doorRightMm = doorSpan.rightMm
+  const mirrorDoorSpan = doorSpan.wall === 'front' || doorSpan.wall === 'left'
+  const doorLeftMm = mirrorDoorSpan ? doorSpan.wallSpanMm - doorSpan.rightMm : doorSpan.leftMm
+  const doorRightMm = mirrorDoorSpan ? doorSpan.wallSpanMm - doorSpan.leftMm : doorSpan.rightMm
   const physicalFrontWall = [p(0, 0, 0), p(longMm, 0, 0), p(longMm, wallHeightMm, 0), p(0, wallHeightMm, 0)]
   const physicalRightWall = [p(longMm, 0, 0), p(longMm, 0, shortMm), p(longMm, wallHeightMm, shortMm), p(longMm, wallHeightMm, 0)]
   const physicalBackWall = [p(0, 0, shortMm), p(longMm, 0, shortMm), p(longMm, wallHeightMm, shortMm), p(0, wallHeightMm, shortMm)]

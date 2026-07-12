@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { Maximize2, Minimize2, Minus, Plus, RotateCcw } from 'lucide-react'
+import { Maximize2, Minimize2, RotateCcw } from 'lucide-react'
 import { ChamberInput, type ChamberResult } from '@renderer/domain/calculator'
 import { buildTopView, type TopShape } from '@renderer/domain/topView'
 
@@ -198,12 +198,6 @@ export function TopView({ input, result }: TopViewProps): JSX.Element {
         {model.shapes.map((shape, index) => renderShape(shape, index))}
       </svg>
       <div className="top-view-controls">
-        <button type="button" aria-label="Приблизить" onClick={() => applyZoom(zoom * 1.3)}>
-          <Plus size={16} />
-        </button>
-        <button type="button" aria-label="Отдалить" onClick={() => applyZoom(zoom / 1.3)}>
-          <Minus size={16} />
-        </button>
         <button type="button" aria-label="Сбросить масштаб" onClick={reset}>
           <RotateCcw size={15} />
         </button>
