@@ -7,3 +7,6 @@ tmp
 *.log
 .env
 .env.*
+context.md
+venv/
+.venv/

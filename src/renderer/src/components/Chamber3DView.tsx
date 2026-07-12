@@ -1,12 +1,37 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Maximize2, Minimize2, RotateCcw } from 'lucide-react'
+import { FileImage, Maximize2, Minimize2, MousePointer2, RotateCcw, SlidersHorizontal, X } from 'lucide-react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { PANEL_WORKING_WIDTH_MM, type ChamberInput } from '@renderer/domain/calculator'
+import {
+  PANEL_WORKING_WIDTH_MM,
+  type CameraView,
+  type Chamber3DSettings,
+  type ChamberInput,
+  type DepthDimensionSide,
+  type DimensionCorner,
+  type DoorHeightDimensionSide,
+  type DoorWidthDimensionSide,
+  type FloorCutLabelSide,
+  type FrontDimensionSide
+} from '@renderer/domain/calculator'
 import { buildChamberPanelRuns, buildPanelRun, normalizeDoorPlacement } from '@renderer/domain/chamberGeometry'
 
 interface Chamber3DViewProps {
   input: ChamberInput
+  settingsOpen?: boolean
+  onSettingsToggle?: () => void
+  showSettingsControl?: boolean
+  allowFullscreen?: boolean
+}
+
+interface Chamber3DSettingsPanelProps {
+  input: ChamberInput
+  onViewSettingsChange: (settings: Chamber3DSettings) => void
+}
+
+interface Chamber3DSettingsEditorProps extends Chamber3DSettingsPanelProps {
+  onClose: () => void
+  pdfCameraDistanceFactor?: number
 }
 
 interface ModelMetrics {
@@ -48,6 +73,254 @@ const SEAM_FACE_DEPTH_M = 0.012
 const SEAM_FACE_OFFSET_M = 0.002
 const CAMERA_FOV_DEG = 26
 const CAMERA_DISTANCE_FACTOR = 1.42
+const cornerOptions: Array<{ value: DimensionCorner; label: string }> = [
+  { value: 'front-left', label: 'Передний левый' },
+  { value: 'front-right', label: 'Передний правый' },
+  { value: 'back-left', label: 'Задний левый' },
+  { value: 'back-right', label: 'Задний правый' }
+]
+const cameraViewOptions: Array<{ value: CameraView; label: string }> = [
+  { value: 'front-left', label: 'Передняя · камера левее' },
+  { value: 'front-right', label: 'Передняя · камера правее' },
+  { value: 'right-left', label: 'Правая · камера левее' },
+  { value: 'right-right', label: 'Правая · камера правее' },
+  { value: 'back-left', label: 'Задняя · камера левее' },
+  { value: 'back-right', label: 'Задняя · камера правее' },
+  { value: 'left-left', label: 'Левая · камера левее' },
+  { value: 'left-right', label: 'Левая · камера правее' }
+]
+const frontSideOptions: Array<{ value: FrontDimensionSide; label: string }> = [
+  { value: 'front', label: 'Спереди' },
+  { value: 'back', label: 'Сзади' }
+]
+const depthSideOptions: Array<{ value: DepthDimensionSide; label: string }> = [
+  { value: 'left', label: 'Слева' },
+  { value: 'right', label: 'Справа' }
+]
+const doorWidthSideOptions: Array<{ value: DoorWidthDimensionSide; label: string }> = [
+  { value: 'above', label: 'Сверху' },
+  { value: 'below', label: 'Снизу' }
+]
+const doorHeightSideOptions: Array<{ value: DoorHeightDimensionSide; label: string }> = depthSideOptions
+const floorCutSideOptions: Array<{ value: FloorCutLabelSide; label: string }> = [
+  { value: 'front', label: 'Спереди' },
+  { value: 'back', label: 'Сзади' }
+]
+
+interface SegmentedSettingProps<T extends string> {
+  label: string
+  valueLabel?: string
+  value: T
+  options: Array<{ value: T; label: string }>
+  onChange: (value: T) => void
+  visible?: boolean
+  visibilityAriaLabel?: string
+  onVisibilityChange?: (visible: boolean) => void
+}
+
+interface DimensionVisibilityToggleProps {
+  checked: boolean
+  label: string
+  onChange: (checked: boolean) => void
+}
+
+function DimensionVisibilityToggle({ checked, label, onChange }: DimensionVisibilityToggleProps): JSX.Element {
+  return (
+    <button
+      className="chamber-3d-visibility-toggle"
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      title={checked ? 'Скрыть размер' : 'Показать размер'}
+      onClick={() => onChange(!checked)}
+    >
+      <span aria-hidden="true" />
+    </button>
+  )
+}
+
+function SegmentedSetting<T extends string>({
+  label,
+  valueLabel,
+  value,
+  options,
+  onChange,
+  visible,
+  visibilityAriaLabel,
+  onVisibilityChange
+}: SegmentedSettingProps<T>): JSX.Element {
+  return (
+    <div className="chamber-3d-setting" role="group" aria-label={label}>
+      <div className="chamber-3d-setting-heading">
+        <div className="chamber-3d-setting-title">
+          <span className="chamber-3d-setting-label">{label}</span>
+          {visible !== undefined && visibilityAriaLabel && onVisibilityChange ? (
+            <DimensionVisibilityToggle
+              checked={visible}
+              label={visibilityAriaLabel}
+              onChange={onVisibilityChange}
+            />
+          ) : null}
+        </div>
+        {valueLabel ? <strong>{valueLabel}</strong> : null}
+      </div>
+      <div className="chamber-3d-setting-options">
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            aria-pressed={value === option.value}
+            onClick={() => onChange(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export function Chamber3DSettingsPanel({
+  input,
+  onViewSettingsChange
+}: Chamber3DSettingsPanelProps): JSX.Element {
+  const placement = normalizeDoorPlacement(input)
+  const sideWallFront = placement.wall === 'left' || placement.wall === 'right'
+  const viewFrontMm = sideWallFront ? Math.min(input.lengthMm, input.widthMm) : Math.max(input.lengthMm, input.widthMm)
+  const viewDepthMm = sideWallFront ? Math.max(input.lengthMm, input.widthMm) : Math.min(input.lengthMm, input.widthMm)
+  const panelRuns = buildChamberPanelRuns(
+    Math.max(input.lengthMm, input.widthMm),
+    Math.min(input.lengthMm, input.widthMm),
+    input.thicknessMm,
+    input.hasPanelFloor
+  )
+  const floorCutMm = panelRuns.floor?.hasCut ? panelRuns.floor.remainderMm : null
+  const formatSettingMm = (value: number): string => `${Math.round(value).toLocaleString('ru-RU')} мм`
+  const updateViewSetting = <K extends keyof Chamber3DSettings>(key: K, value: Chamber3DSettings[K]): void => {
+    onViewSettingsChange({ ...input.view3d, [key]: value })
+  }
+
+  return (
+    <div className="chamber-3d-settings-panel">
+      <section className="chamber-3d-settings-group is-camera">
+        <div className="chamber-3d-settings-group-heading">
+          <span>01</span>
+          <div>
+            <h3>Ракурс камеры</h3>
+            <p>Сначала выберите сторону камеры, затем положение наблюдателя.</p>
+          </div>
+        </div>
+        <SegmentedSetting<CameraView>
+          label="Сторона и положение камеры"
+          value={input.view3d.cameraView}
+          options={cameraViewOptions}
+          onChange={(value) => updateViewSetting('cameraView', value)}
+        />
+      </section>
+
+      <section className="chamber-3d-settings-group is-dimensions">
+        <div className="chamber-3d-settings-group-heading">
+          <span>02</span>
+          <div>
+            <h3>Габариты камеры</h3>
+            <p>Расположите основные размеры вокруг модели.</p>
+          </div>
+        </div>
+        <div className="chamber-3d-settings-group-controls">
+          <SegmentedSetting<FrontDimensionSide>
+            label="Длина камеры"
+            valueLabel={formatSettingMm(viewFrontMm)}
+            value={input.view3d.frontDimensionSide}
+            options={frontSideOptions}
+            onChange={(value) => updateViewSetting('frontDimensionSide', value)}
+            visible={input.view3d.frontDimensionVisible}
+            visibilityAriaLabel="Показывать длину камеры"
+            onVisibilityChange={(visible) => updateViewSetting('frontDimensionVisible', visible)}
+          />
+          <SegmentedSetting<DepthDimensionSide>
+            label="Ширина камеры"
+            valueLabel={formatSettingMm(viewDepthMm)}
+            value={input.view3d.depthDimensionSide}
+            options={depthSideOptions}
+            onChange={(value) => updateViewSetting('depthDimensionSide', value)}
+            visible={input.view3d.depthDimensionVisible}
+            visibilityAriaLabel="Показывать ширину камеры"
+            onVisibilityChange={(visible) => updateViewSetting('depthDimensionVisible', visible)}
+          />
+          <SegmentedSetting<DimensionCorner>
+            label="Высота камеры"
+            valueLabel={formatSettingMm(input.heightMm)}
+            value={input.view3d.heightDimensionCorner}
+            options={cornerOptions}
+            onChange={(value) => updateViewSetting('heightDimensionCorner', value)}
+            visible={input.view3d.heightDimensionVisible}
+            visibilityAriaLabel="Показывать высоту камеры"
+            onVisibilityChange={(visible) => updateViewSetting('heightDimensionVisible', visible)}
+          />
+          {floorCutMm !== null ? (
+            <SegmentedSetting<FloorCutLabelSide>
+              label="Подрезка пола"
+              valueLabel={formatSettingMm(floorCutMm)}
+              value={input.view3d.floorCutLabelSide}
+              options={floorCutSideOptions}
+              onChange={(value) => updateViewSetting('floorCutLabelSide', value)}
+              visible={input.view3d.floorCutDimensionVisible}
+              visibilityAriaLabel="Показывать размер подрезки пола"
+              onVisibilityChange={(visible) => updateViewSetting('floorCutDimensionVisible', visible)}
+            />
+          ) : (
+            <div className="chamber-3d-setting is-unavailable">
+              <div className="chamber-3d-setting-heading">
+                <div className="chamber-3d-setting-title">
+                  <span className="chamber-3d-setting-label">Подрезка пола</span>
+                  <DimensionVisibilityToggle
+                    checked={input.view3d.floorCutDimensionVisible}
+                    label="Показывать размер подрезки пола"
+                    onChange={(visible) => updateViewSetting('floorCutDimensionVisible', visible)}
+                  />
+                </div>
+              </div>
+              <span>Не требуется для текущего пола</span>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="chamber-3d-settings-group is-door">
+        <div className="chamber-3d-settings-group-heading">
+          <span>03</span>
+          <div>
+            <h3>Размеры двери</h3>
+            <p>Настройте подписи проёма отдельно от габаритов камеры.</p>
+          </div>
+        </div>
+        <div className="chamber-3d-settings-group-controls">
+          <SegmentedSetting<DoorWidthDimensionSide>
+            label="Ширина двери"
+            valueLabel={formatSettingMm(placement.widthMm)}
+            value={input.view3d.doorWidthDimensionSide}
+            options={doorWidthSideOptions}
+            onChange={(value) => updateViewSetting('doorWidthDimensionSide', value)}
+            visible={input.view3d.doorWidthDimensionVisible}
+            visibilityAriaLabel="Показывать ширину двери"
+            onVisibilityChange={(visible) => updateViewSetting('doorWidthDimensionVisible', visible)}
+          />
+          <SegmentedSetting<DoorHeightDimensionSide>
+            label="Высота двери"
+            valueLabel={formatSettingMm(input.doorHeightMm)}
+            value={input.view3d.doorHeightDimensionSide}
+            options={doorHeightSideOptions}
+            onChange={(value) => updateViewSetting('doorHeightDimensionSide', value)}
+            visible={input.view3d.doorHeightDimensionVisible}
+            visibilityAriaLabel="Показывать высоту двери"
+            onVisibilityChange={(visible) => updateViewSetting('doorHeightDimensionVisible', visible)}
+          />
+        </div>
+      </section>
+    </div>
+  )
+}
 
 function mmToM(value: number): number {
   return Math.max(value / 1000, MIN_MODEL_SIDE_M)
@@ -350,6 +623,7 @@ function drawCutDimensionAnnotations(
     dimensionLabelScale
   )
   const occupied = dimensionLabels.map((annotation) => annotation.box)
+  occupied.push({ x: 8 * uiScale, y: 8 * uiScale, w: 128 * uiScale, h: 48 * uiScale })
   occupied.push({ x: viewportWidth - 104 * uiScale, y: 8 * uiScale, w: 96 * uiScale, h: 48 * uiScale })
 
   const visible = anchors
@@ -357,7 +631,10 @@ function drawCutDimensionAnnotations(
       const midpoint = anchor.start.clone().add(anchor.end).multiplyScalar(0.5)
       const toCamera = camera.position.clone().sub(midpoint).normalize()
       const facesCamera = anchor.normal.dot(toCamera) > (anchor.kind === 'floor' ? 0.08 : 0.12)
-      return facesCamera && (!anchor.labelGuide || !isWorldPointOccluded(root, camera, anchor.labelGuide.position))
+      return (
+        facesCamera &&
+        (anchor.kind === 'floor' || !anchor.labelGuide || !isWorldPointOccluded(root, camera, anchor.labelGuide.position))
+      )
     })
     .sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'wall' ? -1 : 1))
 
@@ -1100,25 +1377,31 @@ function addDoor(
     depthWrite: false
   })
   const doorDimZ = -0.26
-  const doorTopY = doorHeightM + 0.18
   const doorLeftX = doorCenterX - doorWidthM / 2
   const doorRightX = doorCenterX + doorWidthM / 2
-  addDimensionLine(
-    doorAssembly,
-    new THREE.Vector3(doorLeftX, doorTopY, doorDimZ),
-    new THREE.Vector3(doorRightX, doorTopY, doorDimZ),
-    new THREE.Vector3(0, 0.12, 0),
-    formatMm(placement.widthMm),
-    dimensionMaterial
-  )
-  addDimensionLine(
-    doorAssembly,
-    new THREE.Vector3(doorRightX + 0.24, 0, doorDimZ),
-    new THREE.Vector3(doorRightX + 0.24, doorHeightM, doorDimZ),
-    new THREE.Vector3(0.12, 0, 0),
-    formatMm(input.doorHeightMm),
-    dimensionMaterial
-  )
+  const doorWidthDimensionY = input.view3d.doorWidthDimensionSide === 'below' ? -0.18 : doorHeightM + 0.18
+  const doorHeightDimensionX =
+    input.view3d.doorHeightDimensionSide === 'left' ? doorLeftX - 0.24 : doorRightX + 0.24
+  if (input.view3d.doorWidthDimensionVisible) {
+    addDimensionLine(
+      doorAssembly,
+      new THREE.Vector3(doorLeftX, doorWidthDimensionY, doorDimZ),
+      new THREE.Vector3(doorRightX, doorWidthDimensionY, doorDimZ),
+      new THREE.Vector3(0, 0.12, 0),
+      formatMm(placement.widthMm),
+      dimensionMaterial
+    )
+  }
+  if (input.view3d.doorHeightDimensionVisible) {
+    addDimensionLine(
+      doorAssembly,
+      new THREE.Vector3(doorHeightDimensionX, 0, doorDimZ),
+      new THREE.Vector3(doorHeightDimensionX, doorHeightM, doorDimZ),
+      new THREE.Vector3(0.12, 0, 0),
+      formatMm(input.doorHeightMm),
+      dimensionMaterial
+    )
+  }
 
   if (placement.wall === 'front') {
     doorAssembly.position.z = -metrics.widthM / 2
@@ -1208,7 +1491,8 @@ function addDimensions(
   group: THREE.Group,
   input: ChamberInput,
   metrics: ModelMetrics,
-  thicknessM: number
+  thicknessM: number,
+  sideWallFront: boolean
 ): void {
   const material = new THREE.LineBasicMaterial({
     color: 0x163246,
@@ -1216,38 +1500,55 @@ function addDimensions(
     depthTest: false,
     depthWrite: false
   })
-  const tick = Math.max(Math.min(metrics.lengthM, metrics.widthM) * 0.035, 0.16)
-  const frontZ = -metrics.widthM / 2 - thicknessM - Math.max(metrics.widthM * 0.11, 0.62)
-  const rightX = metrics.lengthM / 2 + thicknessM + Math.max(metrics.lengthM * 0.055, 0.62)
-  const heightZ = -metrics.widthM / 2 - thicknessM - 0.2
+  const viewFrontM = sideWallFront ? metrics.widthM : metrics.lengthM
+  const viewDepthM = sideWallFront ? metrics.lengthM : metrics.widthM
+  const viewFrontMm = sideWallFront ? metrics.widthMm : metrics.lengthMm
+  const viewDepthMm = sideWallFront ? metrics.lengthMm : metrics.widthMm
+  const tick = Math.max(Math.min(viewFrontM, viewDepthM) * 0.035, 0.16)
+  const zOffset = thicknessM + Math.max(viewDepthM * 0.11, 0.62)
+  const xOffset = thicknessM + Math.max(viewFrontM * 0.055, 0.62)
+  const heightZOffset = thicknessM + Math.max(viewDepthM * 0.055, 0.34)
+  const heightXOffset = thicknessM + Math.max(viewFrontM * 0.03, 0.34)
+  const dimensionZ = (input.view3d.frontDimensionSide === 'back' ? 1 : -1) * (viewDepthM / 2 + zOffset)
+  const dimensionX = (input.view3d.depthDimensionSide === 'left' ? -1 : 1) * (viewFrontM / 2 + xOffset)
+  const heightBack = input.view3d.heightDimensionCorner.startsWith('back-')
+  const heightLeft = input.view3d.heightDimensionCorner.endsWith('-left')
+  const heightZ = (heightBack ? 1 : -1) * (viewDepthM / 2 + heightZOffset)
+  const heightX = (heightLeft ? -1 : 1) * (viewFrontM / 2 + heightXOffset)
   const y = 0.08
 
-  addDimensionLine(
-    group,
-    new THREE.Vector3(-metrics.lengthM / 2, y, frontZ),
-    new THREE.Vector3(metrics.lengthM / 2, y, frontZ),
-    new THREE.Vector3(0, 0, tick),
-    formatMm(metrics.lengthMm),
-    material
-  )
+  if (input.view3d.frontDimensionVisible) {
+    addDimensionLine(
+      group,
+      new THREE.Vector3(-viewFrontM / 2, y, dimensionZ),
+      new THREE.Vector3(viewFrontM / 2, y, dimensionZ),
+      new THREE.Vector3(0, 0, tick),
+      formatMm(viewFrontMm),
+      material
+    )
+  }
 
-  addDimensionLine(
-    group,
-    new THREE.Vector3(rightX, y, -metrics.widthM / 2),
-    new THREE.Vector3(rightX, y, metrics.widthM / 2),
-    new THREE.Vector3(tick, 0, 0),
-    formatMm(metrics.widthMm),
-    material
-  )
+  if (input.view3d.depthDimensionVisible) {
+    addDimensionLine(
+      group,
+      new THREE.Vector3(dimensionX, y, -viewDepthM / 2),
+      new THREE.Vector3(dimensionX, y, viewDepthM / 2),
+      new THREE.Vector3(tick, 0, 0),
+      formatMm(viewDepthMm),
+      material
+    )
+  }
 
-  addDimensionLine(
-    group,
-    new THREE.Vector3(rightX, 0, heightZ),
-    new THREE.Vector3(rightX, metrics.totalHeightM, heightZ),
-    new THREE.Vector3(tick, 0, 0),
-    formatMm(input.heightMm),
-    material
-  )
+  if (input.view3d.heightDimensionVisible) {
+    addDimensionLine(
+      group,
+      new THREE.Vector3(heightX, 0, heightZ),
+      new THREE.Vector3(heightX, metrics.totalHeightM, heightZ),
+      new THREE.Vector3(tick, 0, 0),
+      formatMm(input.heightMm),
+      material
+    )
+  }
 
 }
 
@@ -1299,26 +1600,27 @@ function buildCutDimensionAnchors(input: ChamberInput, metrics: ModelMetrics, th
     })
   }
 
-  if (runs.floor?.hasCut) {
+  if (input.view3d.floorCutDimensionVisible && runs.floor?.hasCut) {
     const cutM = runs.floor.remainderMm / 1000
     const endX = metrics.floorLengthM / 2
     const startX = endX - cutM
-    const frontZ = -metrics.floorWidthM / 2 - surfaceOffset
+    const sideSign = input.view3d.floorCutLabelSide === 'back' ? 1 : -1
+    const edgeZ = sideSign * (metrics.floorWidthM / 2 + surfaceOffset)
     const dimensionY = 0.08
-    const dimensionZ = -metrics.widthM / 2 - thicknessM - Math.max(metrics.widthM * 0.11, 0.62)
+    const dimensionZ = sideSign * (metrics.widthM / 2 + thicknessM + Math.max(metrics.widthM * 0.11, 0.62))
     const labelDistanceM = Math.max(metrics.widthM * 0.18, 0.8)
 
     anchors.push({
-      end: new THREE.Vector3(endX, Math.max(thicknessM * 0.45, 0.025), frontZ),
+      end: new THREE.Vector3(endX, Math.max(thicknessM * 0.45, 0.025), edgeZ),
       kind: 'floor',
       label: `Пол · ${formatMm(runs.floor.remainderMm)}`,
       labelGuide: {
-        end: new THREE.Vector3(-metrics.lengthM / 2, dimensionY, dimensionZ),
-        position: new THREE.Vector3(metrics.lengthM / 2, dimensionY, dimensionZ - labelDistanceM),
-        start: new THREE.Vector3(metrics.lengthM / 2, dimensionY, dimensionZ)
+        start: new THREE.Vector3(startX, dimensionY, dimensionZ),
+        end: new THREE.Vector3(endX, dimensionY, dimensionZ),
+        position: new THREE.Vector3(endX, dimensionY, dimensionZ + sideSign * labelDistanceM)
       },
       normal: new THREE.Vector3(0, 1, 0),
-      start: new THREE.Vector3(startX, Math.max(thicknessM * 0.45, 0.025), frontZ)
+      start: new THREE.Vector3(startX, Math.max(thicknessM * 0.45, 0.025), edgeZ)
     })
   }
 
@@ -1331,6 +1633,8 @@ function createChamberModel(input: ChamberInput): {
   cutDimensions: CutDimensionAnchor[]
 } {
   const group = new THREE.Group()
+  const chamberGroup = new THREE.Group()
+  group.add(chamberGroup)
   const lengthMm = Math.max(input.lengthMm, input.widthMm)
   const widthMm = Math.min(input.lengthMm, input.widthMm)
   const lengthM = mmToM(lengthMm)
@@ -1375,7 +1679,7 @@ function createChamberModel(input: ChamberInput): {
 
   if (input.hasPanelFloor) {
     addBox(
-      group,
+      chamberGroup,
       new THREE.Vector3(floorLengthM, thicknessM, floorWidthM),
       new THREE.Vector3(0, thicknessM / 2, 0),
       sidePanelMaterial,
@@ -1384,17 +1688,16 @@ function createChamberModel(input: ChamberInput): {
   }
 
   addBox(
-    group,
+    chamberGroup,
     new THREE.Vector3(lengthM, thicknessM, widthM),
     new THREE.Vector3(0, wallHeightM + thicknessM / 2, 0),
     panelMaterial,
     edgeMaterial
   )
 
-  addWallPanels(group, metrics, thicknessM, panelMaterial, sidePanelMaterial, wallCutMaterial, seamMaterial, edgeMaterial)
-  addDeckSeams(group, metrics, thicknessM, input.hasPanelFloor, seamMaterial, cutMaterial)
-  addDoor(group, input, metrics, doorMaterial, frameMaterial, glassMaterial, railMaterial, railAccentMaterial, handleMaterial)
-  addDimensions(group, input, metrics, thicknessM)
+  addWallPanels(chamberGroup, metrics, thicknessM, panelMaterial, sidePanelMaterial, wallCutMaterial, seamMaterial, edgeMaterial)
+  addDeckSeams(chamberGroup, metrics, thicknessM, input.hasPanelFloor, seamMaterial, cutMaterial)
+  addDoor(chamberGroup, input, metrics, doorMaterial, frameMaterial, glassMaterial, railMaterial, railAccentMaterial, handleMaterial)
 
   const placement = normalizeDoorPlacement(input)
   const rotationY =
@@ -1405,23 +1708,30 @@ function createChamberModel(input: ChamberInput): {
         : placement.wall === 'right'
           ? Math.PI / 2
           : 0
-  group.rotation.y = rotationY
+  chamberGroup.rotation.y = rotationY
+  const sideWallFront = placement.wall === 'left' || placement.wall === 'right'
+  addDimensions(group, input, metrics, thicknessM, sideWallFront)
 
   const rotation = new THREE.Euler(0, rotationY, 0)
   const rotatePoint = (point: THREE.Vector3): THREE.Vector3 => point.clone().applyEuler(rotation)
-  const cutDimensions = buildCutDimensionAnchors(input, metrics, thicknessM).map((anchor) => ({
-    ...anchor,
-    start: rotatePoint(anchor.start),
-    end: rotatePoint(anchor.end),
-    normal: rotatePoint(anchor.normal).normalize(),
-    labelGuide: anchor.labelGuide
-      ? {
-          start: rotatePoint(anchor.labelGuide.start),
-          end: rotatePoint(anchor.labelGuide.end),
-          position: rotatePoint(anchor.labelGuide.position)
-        }
-      : undefined
-  }))
+  const cutDimensions = buildCutDimensionAnchors(input, metrics, thicknessM).map((anchor) => {
+    const start = rotatePoint(anchor.start)
+    const end = rotatePoint(anchor.end)
+
+    return {
+      ...anchor,
+      start,
+      end,
+      normal: rotatePoint(anchor.normal).normalize(),
+      labelGuide: anchor.labelGuide
+        ? {
+            start: rotatePoint(anchor.labelGuide.start),
+            end: rotatePoint(anchor.labelGuide.end),
+            position: rotatePoint(anchor.labelGuide.position)
+          }
+        : undefined
+    }
+  })
 
   return { group, metrics, cutDimensions }
 }
@@ -1454,13 +1764,28 @@ function placeCamera(
   camera: THREE.PerspectiveCamera,
   target: THREE.Vector3,
   modelRadiusM: number,
+  cameraView: CameraView,
   distanceFactor = CAMERA_DISTANCE_FACTOR
 ): void {
   const verticalFov = THREE.MathUtils.degToRad(camera.fov)
   const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect)
   const limitingHalfFov = Math.min(verticalFov, horizontalFov) / 2
   const distance = Math.max((modelRadiusM / Math.sin(limitingHalfFov)) * distanceFactor, 3.5)
-  const direction = new THREE.Vector3(0.42, 0.5, -1).normalize()
+  const wall = cameraView.split('-')[0] as 'front' | 'right' | 'back' | 'left'
+  const wallNormal =
+    wall === 'front'
+      ? new THREE.Vector3(0, 0, -1)
+      : wall === 'right'
+        ? new THREE.Vector3(1, 0, 0)
+        : wall === 'back'
+          ? new THREE.Vector3(0, 0, 1)
+          : new THREE.Vector3(-1, 0, 0)
+  const tangentRight = new THREE.Vector3(-wallNormal.z, 0, wallNormal.x)
+  const horizontalDirection = wallNormal.addScaledVector(
+    tangentRight,
+    cameraView.endsWith('-left') ? -0.42 : 0.42
+  )
+  const direction = new THREE.Vector3(horizontalDirection.x, 0.5, horizontalDirection.z).normalize()
   camera.position.copy(target).add(direction.multiplyScalar(distance))
   camera.lookAt(target)
   camera.updateProjectionMatrix()
@@ -1491,7 +1816,7 @@ export function renderChamber3DToDataUrl(
   addSceneLights(scene, maxSideM)
   addGround(scene, maxSideM)
   configurePerspectiveCamera(camera, width, height)
-  placeCamera(camera, target, modelRadiusM, cameraDistanceFactor)
+  placeCamera(camera, target, modelRadiusM, input.view3d.cameraView, cameraDistanceFactor)
   layoutDimensionLabels(scene, camera, width, height)
   renderer.render(scene, camera)
 
@@ -1542,7 +1867,136 @@ function disposeScene(scene: THREE.Scene): void {
   materials.forEach((material) => material.dispose())
 }
 
-export function Chamber3DView({ input }: Chamber3DViewProps): JSX.Element {
+export function Chamber3DSettingsEditor({
+  input,
+  onClose,
+  onViewSettingsChange,
+  pdfCameraDistanceFactor = 0.92
+}: Chamber3DSettingsEditorProps): JSX.Element {
+  const [pdfPreview, setPdfPreview] = useState<string | null>(null)
+  const [pdfPreviewError, setPdfPreviewError] = useState(false)
+
+  useEffect(() => {
+    document.body.classList.add('view3d-editor-open')
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        onClose()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      document.body.classList.remove('view3d-editor-open')
+    }
+  }, [onClose])
+
+  useEffect(() => {
+    let disposed = false
+    const frameId = window.requestAnimationFrame(() => {
+      try {
+        const image = renderChamber3DToDataUrl(input, 1400, 760, pdfCameraDistanceFactor)
+        if (!disposed) {
+          setPdfPreview(image)
+          setPdfPreviewError(false)
+        }
+      } catch {
+        if (!disposed) {
+          setPdfPreviewError(true)
+        }
+      }
+    })
+
+    return () => {
+      disposed = true
+      window.cancelAnimationFrame(frameId)
+    }
+  }, [input, pdfCameraDistanceFactor])
+
+  return (
+    <div className="chamber-3d-editor" role="dialog" aria-modal="true" aria-labelledby="chamber-3d-editor-title">
+      <header className="chamber-3d-editor-header">
+        <div className="chamber-3d-editor-title">
+          <span className="chamber-3d-editor-title-icon" aria-hidden="true">
+            <SlidersHorizontal size={20} />
+          </span>
+          <div>
+            <h2 id="chamber-3d-editor-title">Настройка 3D-вида</h2>
+            <p>{input.title} · изменения сразу сохраняются для изображения в КП</p>
+          </div>
+        </div>
+        <button className="chamber-3d-editor-close" type="button" onClick={onClose}>
+          <span>Готово</span>
+          <X size={18} />
+        </button>
+      </header>
+
+      <main className="chamber-3d-editor-content">
+        <div className="chamber-3d-editor-settings">
+          <Chamber3DSettingsPanel input={input} onViewSettingsChange={onViewSettingsChange} />
+        </div>
+
+        <div className="chamber-3d-editor-previews">
+          <section className="chamber-3d-editor-preview-card is-interactive">
+            <div className="chamber-3d-editor-preview-heading">
+              <div>
+                <span className="chamber-3d-editor-preview-icon" aria-hidden="true">
+                  <MousePointer2 size={16} />
+                </span>
+                <div>
+                  <h3>Интерактивная модель</h3>
+                  <p>Поворачивайте и приближайте модель мышью</p>
+                </div>
+              </div>
+              <span className="chamber-3d-editor-preview-badge">Интерактивно</span>
+            </div>
+            <div className="chamber-3d-editor-live">
+              <Chamber3DView
+                input={input}
+                showSettingsControl={false}
+                allowFullscreen={false}
+              />
+            </div>
+          </section>
+
+          <section className="chamber-3d-editor-preview-card is-pdf">
+            <div className="chamber-3d-editor-preview-heading">
+              <div>
+                <span className="chamber-3d-editor-preview-icon" aria-hidden="true">
+                  <FileImage size={16} />
+                </span>
+                <div>
+                  <h3>Изображение в КП</h3>
+                  <p>Статичный PNG, который будет вставлен в PDF</p>
+                </div>
+              </div>
+              <span className="chamber-3d-editor-preview-badge">1400 × 760</span>
+            </div>
+            <div className="chamber-3d-editor-pdf-image">
+              {pdfPreview ? (
+                <img src={pdfPreview} alt="Статичный 3D-вид для коммерческого предложения" />
+              ) : pdfPreviewError ? (
+                <p>Не удалось сформировать изображение</p>
+              ) : (
+                <p>Формируем изображение…</p>
+              )}
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+  )
+}
+
+export function Chamber3DView({
+  input,
+  settingsOpen = false,
+  onSettingsToggle,
+  showSettingsControl = true,
+  allowFullscreen = true
+}: Chamber3DViewProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const resetCameraRef = useRef<(() => void) | null>(null)
   const [fullscreen, setFullscreen] = useState(false)
@@ -1557,6 +2011,7 @@ export function Chamber3DView({ input }: Chamber3DViewProps): JSX.Element {
         input.doorWidthMm,
         input.doorWall,
         input.doorOffsetMm,
+        ...Object.values(input.view3d),
         input.doorHeightMm,
         input.doorType,
         input.doorHasThreshold ? 'threshold' : 'nothreshold'
@@ -1568,6 +2023,7 @@ export function Chamber3DView({ input }: Chamber3DViewProps): JSX.Element {
       input.doorWidthMm,
       input.doorWall,
       input.doorOffsetMm,
+      input.view3d,
       input.hasPanelFloor,
       input.heightMm,
       input.lengthMm,
@@ -1612,7 +2068,7 @@ export function Chamber3DView({ input }: Chamber3DViewProps): JSX.Element {
     controls.target.copy(target)
 
     const resetCamera = (): void => {
-      placeCamera(camera, target, modelRadiusM, CAMERA_DISTANCE_FACTOR)
+      placeCamera(camera, target, modelRadiusM, input.view3d.cameraView, CAMERA_DISTANCE_FACTOR)
       controls.target.copy(target)
       controls.update()
     }
@@ -1687,6 +2143,7 @@ export function Chamber3DView({ input }: Chamber3DViewProps): JSX.Element {
     input.doorWidthMm,
     input.doorWall,
     input.doorOffsetMm,
+    input.view3d,
     input.hasPanelFloor,
     input.heightMm,
     input.lengthMm,
@@ -1724,6 +2181,21 @@ export function Chamber3DView({ input }: Chamber3DViewProps): JSX.Element {
         role="img"
         aria-label={`3D-вид камеры ${input.lengthMm}x${input.widthMm}x${input.heightMm} мм, дверь: ${input.doorType}, стена: ${input.doorWall}`}
       />
+      {showSettingsControl && onSettingsToggle ? (
+        <div className="dimension-corner-control">
+          <button
+            className={`view-control-button dimension-corner-trigger${settingsOpen ? ' is-active' : ''}`}
+            type="button"
+            title="Настроить 3D-вид"
+            aria-label="Настроить 3D-вид"
+            aria-expanded={settingsOpen}
+            onClick={onSettingsToggle}
+          >
+            <SlidersHorizontal size={16} />
+            <span>Настройки 3D</span>
+          </button>
+        </div>
+      ) : null}
       <div className="view-floating-controls">
         <button
           className="view-control-button"
@@ -1734,15 +2206,17 @@ export function Chamber3DView({ input }: Chamber3DViewProps): JSX.Element {
         >
           <RotateCcw size={16} />
         </button>
-        <button
-          className="view-control-button"
-          type="button"
-          title={fullscreen ? 'Свернуть 3D-вид' : 'Развернуть 3D-вид'}
-          aria-label={fullscreen ? 'Свернуть 3D-вид' : 'Развернуть 3D-вид'}
-          onClick={() => setFullscreen((value) => !value)}
-        >
-          {fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-        </button>
+        {allowFullscreen ? (
+          <button
+            className="view-control-button"
+            type="button"
+            title={fullscreen ? 'Свернуть 3D-вид' : 'Развернуть 3D-вид'}
+            aria-label={fullscreen ? 'Свернуть 3D-вид' : 'Развернуть 3D-вид'}
+            onClick={() => setFullscreen((value) => !value)}
+          >
+            {fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          </button>
+        ) : null}
       </div>
     </div>
   )

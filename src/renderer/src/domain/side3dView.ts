@@ -45,6 +45,19 @@ function cutDim(start: Point, end: Point, label: string, offset: Point, labelOff
   )}${text(mid, label)}`
 }
 
+function cutDimWithLabel(start: Point, end: Point, label: string, labelPosition: Point): string {
+  const offset = { x: 0, y: 14 }
+  const dimStart = { x: start.x + offset.x, y: start.y + offset.y }
+  const dimEnd = { x: end.x + offset.x, y: end.y + offset.y }
+  const dimMid = { x: (dimStart.x + dimEnd.x) / 2, y: (dimStart.y + dimEnd.y) / 2 }
+
+  return `${line(start, dimStart, 'cut-extension')}${line(end, dimEnd, 'cut-extension')}${line(
+    dimStart,
+    dimEnd,
+    'cut-dim-line'
+  )}${line(dimMid, labelPosition, 'cut-extension')}${text(labelPosition, label)}`
+}
+
 export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): string {
   const longMm = result.longSideMm
   const shortMm = result.shortSideMm
@@ -58,6 +71,20 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
   const isSideFront = doorSpan.wall === 'left' || doorSpan.wall === 'right'
   const viewFrontMm = isSideFront ? shortMm : longMm
   const viewDepthMm = isSideFront ? longMm : shortMm
+  const cameraWall = input.view3d.cameraView.split('-')[0]
+  const cameraOffset = input.view3d.cameraView.endsWith('-left') ? -0.42 : 0.42
+  const cameraNormal =
+    cameraWall === 'front'
+      ? { x: 0, z: -1 }
+      : cameraWall === 'right'
+        ? { x: 1, z: 0 }
+        : cameraWall === 'back'
+          ? { x: 0, z: 1 }
+          : { x: -1, z: 0 }
+  const cameraX = cameraNormal.x - cameraNormal.z * cameraOffset
+  const cameraZ = cameraNormal.z + cameraNormal.x * cameraOffset
+  const cameraFromLeft = cameraX < 0
+  const cameraFromBack = cameraZ > 0
 
   const width = 900
   const height = 430
@@ -73,12 +100,21 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
     if (doorSpan.wall === 'right') return { x: z, z: longMm - x }
     return { x, z }
   }
+  const projectViewPoint = (x: number, y: number, z: number): Point => {
+    const projectedDepth = cameraFromBack ? viewDepthMm - z : z
+    return {
+      x:
+        ox +
+        (cameraFromLeft
+          ? x + (viewDepthMm - projectedDepth) * depthX
+          : viewFrontMm - x + projectedDepth * depthX) *
+          scale,
+      y: oy - (y + projectedDepth * depthY) * scale
+    }
+  }
   const p = (x: number, y: number, z: number): Point => {
     const oriented = orient(x, z)
-    return {
-      x: ox + (viewFrontMm - oriented.x + oriented.z * depthX) * scale,
-      y: oy - (y + oriented.z * depthY) * scale
-    }
+    return projectViewPoint(oriented.x, y, oriented.z)
   }
   const dp = (alongMm: number, y: number, outwardMm: number): Point => {
     if (doorSpan.wall === 'back') return p(alongMm, y, shortMm + outwardMm)
@@ -212,36 +248,54 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
     roofSeams.push(line(p(x, heightMm + 5, 0), p(x, heightMm + 5, shortMm), 'seam-line'))
   }
 
-  const lengthDimZ = -shortMm * 0.18
-  const lengthDim = dim(p(0, 0, lengthDimZ), p(longMm, 0, lengthDimZ), `Длина ${fmt(longMm)}`, { x: 0, y: 18 })
-  const widthStart = p(longMm, 0, 0)
-  const widthEnd = p(longMm, 0, shortMm)
-  const widthDim = dim(
-    { x: widthStart.x + 42, y: widthStart.y + 8 },
-    { x: widthEnd.x + 42, y: widthEnd.y + 8 },
-    `Ширина ${fmt(shortMm)}`,
-    { x: 34, y: 4 }
-  )
-  const heightStart = p(longMm, 0, shortMm)
-  const heightEnd = p(longMm, heightMm, shortMm)
-  const heightDim = dim(
-    { x: heightStart.x + 72, y: heightStart.y },
-    { x: heightEnd.x + 72, y: heightEnd.y },
-    `Высота ${fmt(heightMm)}`,
-    { x: 46, y: 4 }
-  )
-  const doorWidthDim = dim(
-    dp(doorLeftMm, doorHeightMm + 180, 90),
-    dp(doorRightMm, doorHeightMm + 180, 90),
-    `Ширина двери ${fmt(input.doorWidthMm)}`,
-    { x: 0, y: -10 }
-  )
-  const doorHeightDim = dim(
-    dp(doorRightMm + 210, 0, 90),
-    dp(doorRightMm + 210, doorHeightMm, 90),
-    `Высота двери ${fmt(input.doorHeightMm)}`,
-    { x: 54, y: 4 }
-  )
+  const dimensionZ = input.view3d.frontDimensionSide === 'back' ? viewDepthMm * 1.18 : -viewDepthMm * 0.18
+  const dimensionX = input.view3d.depthDimensionSide === 'left' ? -viewFrontMm * 0.12 : viewFrontMm * 1.12
+  const isHeightBack = input.view3d.heightDimensionCorner.startsWith('back-')
+  const isHeightLeft = input.view3d.heightDimensionCorner.endsWith('-left')
+  const heightZ = isHeightBack ? viewDepthMm * 1.08 : -viewDepthMm * 0.08
+  const heightX = isHeightLeft ? -viewFrontMm * 0.06 : viewFrontMm * 1.06
+  const frontDimensionLabel = isSideFront ? `Ширина ${fmt(shortMm)}` : `Длина ${fmt(longMm)}`
+  const depthDimensionLabel = isSideFront ? `Длина ${fmt(longMm)}` : `Ширина ${fmt(shortMm)}`
+  const lengthDim = input.view3d.frontDimensionVisible
+    ? dim(
+        projectViewPoint(0, 0, dimensionZ),
+        projectViewPoint(viewFrontMm, 0, dimensionZ),
+        frontDimensionLabel,
+        { x: 0, y: input.view3d.frontDimensionSide === 'back' ? -10 : 18 }
+      )
+    : ''
+  const widthStart = projectViewPoint(dimensionX, 0, 0)
+  const widthEnd = projectViewPoint(dimensionX, 0, viewDepthMm)
+  const widthDirection = input.view3d.depthDimensionSide === 'left' ? -1 : 1
+  const widthDim = input.view3d.depthDimensionVisible
+    ? dim(widthStart, widthEnd, depthDimensionLabel, { x: 34 * widthDirection, y: 4 })
+    : ''
+  const heightStart = projectViewPoint(heightX, 0, heightZ)
+  const heightEnd = projectViewPoint(heightX, heightMm, heightZ)
+  const heightDirection = isHeightLeft ? -1 : 1
+  const heightDim = input.view3d.heightDimensionVisible
+    ? dim(heightStart, heightEnd, `Высота ${fmt(heightMm)}`, { x: 34 * heightDirection, y: 4 })
+    : ''
+  const doorWidthY = input.view3d.doorWidthDimensionSide === 'below' ? -180 : doorHeightMm + 180
+  const doorWidthDim = input.view3d.doorWidthDimensionVisible
+    ? dim(
+        dp(doorLeftMm, doorWidthY, 90),
+        dp(doorRightMm, doorWidthY, 90),
+        `Ширина двери ${fmt(input.doorWidthMm)}`,
+        { x: 0, y: -10 }
+      )
+    : ''
+  const doorHeightAlongMm =
+    input.view3d.doorHeightDimensionSide === 'left' ? doorLeftMm - 210 : doorRightMm + 210
+  const doorHeightDirection = input.view3d.doorHeightDimensionSide === 'left' ? -1 : 1
+  const doorHeightDim = input.view3d.doorHeightDimensionVisible
+    ? dim(
+        dp(doorHeightAlongMm, 0, 90),
+        dp(doorHeightAlongMm, doorHeightMm, 90),
+        `Высота двери ${fmt(input.doorHeightMm)}`,
+        { x: 54 * doorHeightDirection, y: 4 }
+      )
+    : ''
   const doorCenterMm = (doorLeftMm + doorRightMm) / 2
   const doorHandleX = input.doorType === 'double' ? doorCenterMm - doorWidthMm * 0.075 : doorCenterMm + doorWidthMm * 0.34
   const doorHandle = dp(doorHandleX, doorHeightMm * 0.52, 82)
@@ -308,13 +362,16 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
   }
   const longWallCutDim = wallCutDim(doorSpan.wall, true)
   const shortWallCutDim = wallCutDim(adjacentRightWall[doorSpan.wall], false)
-  const floorCutDim = panelRuns.floor?.hasCut
-    ? cutDim(
-        p(floorCutStartMm, thicknessMm + 25, thicknessMm + floorShortMm * 0.45),
-        p(floorCutEndMm, thicknessMm + 25, thicknessMm + floorShortMm * 0.45),
+  const floorCutBack = input.view3d.floorCutLabelSide === 'back'
+  const floorCutDimensionZ = floorCutBack ? thicknessMm + floorShortMm : thicknessMm
+  const floorCutLabelZ = floorCutDimensionZ + (floorCutBack ? 1 : -1) * Math.max(shortMm * 0.18, 700)
+  const floorCutLabelPosition = p(floorCutEndMm, 0, floorCutLabelZ)
+  const floorCutDim = input.view3d.floorCutDimensionVisible && panelRuns.floor?.hasCut
+    ? cutDimWithLabel(
+        p(floorCutStartMm, thicknessMm + 25, floorCutDimensionZ),
+        p(floorCutEndMm, thicknessMm + 25, floorCutDimensionZ),
         `Пол · ${fmt(panelRuns.floor.remainderMm)}`,
-        { x: 0, y: 14 },
-        { x: 0, y: 16 }
+        floorCutLabelPosition
       )
     : ''
 

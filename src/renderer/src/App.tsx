@@ -9,9 +9,13 @@ import {
   PanelFilling,
   PanelThickness,
   ChamberInput,
+  Chamber3DSettings,
+  CameraView,
+  DimensionCorner,
   DoorWall,
   EstimateExtraRow,
-  ProposalOptions
+  ProposalOptions,
+  defaultChamber3DSettings
 } from './domain/calculator'
 import { DOOR_INSTALLATION_NOTE, buildProposalHtml, buildVisualsPdfHtml, type ProposalPdfChamber } from './domain/proposal'
 import { buildOptimizationReport } from './domain/optimizer'
@@ -26,7 +30,7 @@ import {
   defaultCustomerData,
   defaultProposalSettings
 } from './domain/proposalData'
-import { Chamber3DView, renderChamber3DToDataUrl } from './components/Chamber3DView'
+import { Chamber3DSettingsEditor, Chamber3DView, renderChamber3DToDataUrl } from './components/Chamber3DView'
 import { TopView } from './components/TopView'
 import { SettingsModal } from './components/SettingsModal'
 import { NumberField } from './components/NumberField'
@@ -111,6 +115,11 @@ function defaultFileName(chambers: ChamberInput[], proposal: ProposalSettings): 
   return `${prefix}_${size}${suffix}`
 }
 
+type RestorableChamber = Partial<ChamberInput> & {
+  dimensionCorner?: DimensionCorner
+  view3d?: Partial<Chamber3DSettings>
+}
+
 function normalizeChamberDoor(chamber: ChamberInput): ChamberInput {
   const placement = normalizeDoorPlacement(chamber)
   return {
@@ -119,6 +128,54 @@ function normalizeChamberDoor(chamber: ChamberInput): ChamberInput {
     doorWall: placement.wall,
     doorOffsetMm: placement.offsetMm
   }
+}
+
+function restoreCameraView(value: string | undefined): CameraView {
+  if (
+    value === 'front-left' ||
+    value === 'front-right' ||
+    value === 'right-left' ||
+    value === 'right-right' ||
+    value === 'back-left' ||
+    value === 'back-right' ||
+    value === 'left-left' ||
+    value === 'left-right'
+  ) {
+    return value
+  }
+  if (value === 'left-front') return 'front-left'
+  if (value === 'left-side') return 'left-right'
+  if (value === 'right-side') return 'right-left'
+  return 'front-right'
+}
+
+function restoreChamber(chamber: RestorableChamber, createNewId = false): ChamberInput {
+  const { dimensionCorner: legacyCorner, ...currentChamber } = chamber
+  const legacyView3d = legacyCorner
+    ? {
+        frontDimensionSide: legacyCorner.startsWith('back-') ? ('back' as const) : ('front' as const),
+        depthDimensionSide: legacyCorner.endsWith('-left') ? ('left' as const) : ('right' as const),
+        heightDimensionCorner: legacyCorner
+      }
+    : {}
+  const restored = {
+    ...defaultChamberInput,
+    ...currentChamber,
+      view3d: {
+        ...defaultChamber3DSettings,
+        ...legacyView3d,
+        ...currentChamber.view3d,
+        cameraView: restoreCameraView(currentChamber.view3d?.cameraView),
+        frontDimensionVisible: currentChamber.view3d?.frontDimensionVisible ?? true,
+        depthDimensionVisible: currentChamber.view3d?.depthDimensionVisible ?? true,
+        heightDimensionVisible: currentChamber.view3d?.heightDimensionVisible ?? true,
+        floorCutDimensionVisible: currentChamber.view3d?.floorCutDimensionVisible ?? true,
+        doorWidthDimensionVisible: currentChamber.view3d?.doorWidthDimensionVisible ?? true,
+        doorHeightDimensionVisible: currentChamber.view3d?.doorHeightDimensionVisible ?? true
+      }
+  }
+
+  return normalizeChamberDoor(createNewId ? createChamber(restored) : restored)
 }
 
 export function App(): JSX.Element {
@@ -135,6 +192,7 @@ export function App(): JSX.Element {
   const [settingsLoaded, setSettingsLoaded] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [doorEditorOpen, setDoorEditorOpen] = useState(false)
+  const [view3dSettingsOpen, setView3dSettingsOpen] = useState(false)
 
   const activeChamber = chambers.find((chamber) => chamber.id === activeId) ?? chambers[0]
   const proposalResult = useMemo(
@@ -293,14 +351,14 @@ export function App(): JSX.Element {
     setCustomer({ ...defaultCustomerData, ...saved.customer })
 
     if (saved.chambers && saved.chambers.length > 0) {
-      const restored = saved.chambers.map((chamber) => normalizeChamberDoor({ ...defaultChamberInput, ...chamber }))
+      const restored = saved.chambers.map((chamber) => restoreChamber(chamber))
       setChambers(restored)
       setActiveId(restored[0].id)
       setOptions({ ...defaultProposalOptions, ...saved.options })
       setEquipmentImages(saved.equipmentImages ?? {})
     } else if (saved.input) {
       // Legacy single-chamber file.
-      const legacy = normalizeChamberDoor(createChamber({ ...defaultChamberInput, ...saved.input }))
+      const legacy = restoreChamber(saved.input, true)
       setChambers([legacy])
       setActiveId(legacy.id)
       setOptions({
@@ -348,7 +406,7 @@ export function App(): JSX.Element {
       const saveResult = await window.fwApp.saveCalculation({
         defaultName: defaultFileName(chambers, proposal),
         data: {
-          version: 3,
+          version: 6,
           savedAt: new Date().toISOString(),
           proposal,
           company,
@@ -1004,7 +1062,11 @@ export function App(): JSX.Element {
                     {activeResult.panelFillingLabel} {activeChamber.thicknessMm} мм
                   </span>
                 </div>
-                <Chamber3DView input={activeChamber} />
+                <Chamber3DView
+                  input={activeChamber}
+                  settingsOpen={view3dSettingsOpen}
+                  onSettingsToggle={() => setView3dSettingsOpen((value) => !value)}
+                />
               </div>
               <div className="drawing-card">
                 <div className="card-heading">
@@ -1128,6 +1190,14 @@ export function App(): JSX.Element {
           setStatusMessage('Положение двери изменено')
         }}
       />
+      {view3dSettingsOpen ? (
+        <Chamber3DSettingsEditor
+          input={activeChamber}
+          pdfCameraDistanceFactor={PROPOSAL_PDF_3D_CAMERA_DISTANCE_FACTOR}
+          onClose={() => setView3dSettingsOpen(false)}
+          onViewSettingsChange={(view3d) => updateActive('view3d', view3d)}
+        />
+      ) : null}
     </div>
   )
 }

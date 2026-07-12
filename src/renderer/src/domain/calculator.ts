@@ -8,6 +8,53 @@ export type ProposalMode = 'detailed' | 'compact'
 export type DoorType = 'single' | 'double' | 'sliding'
 export type SlideSide = 'left' | 'right'
 export type DoorWall = 'front' | 'right' | 'back' | 'left'
+export type DimensionCorner = 'front-left' | 'front-right' | 'back-left' | 'back-right'
+export type CameraView =
+  | 'front-left'
+  | 'front-right'
+  | 'right-left'
+  | 'right-right'
+  | 'back-left'
+  | 'back-right'
+  | 'left-left'
+  | 'left-right'
+export type FrontDimensionSide = 'front' | 'back'
+export type DepthDimensionSide = 'left' | 'right'
+export type DoorWidthDimensionSide = 'above' | 'below'
+export type DoorHeightDimensionSide = 'left' | 'right'
+export type FloorCutLabelSide = 'front' | 'back'
+
+export interface Chamber3DSettings {
+  cameraView: CameraView
+  frontDimensionSide: FrontDimensionSide
+  frontDimensionVisible: boolean
+  depthDimensionSide: DepthDimensionSide
+  depthDimensionVisible: boolean
+  heightDimensionCorner: DimensionCorner
+  heightDimensionVisible: boolean
+  doorWidthDimensionSide: DoorWidthDimensionSide
+  doorWidthDimensionVisible: boolean
+  doorHeightDimensionSide: DoorHeightDimensionSide
+  doorHeightDimensionVisible: boolean
+  floorCutLabelSide: FloorCutLabelSide
+  floorCutDimensionVisible: boolean
+}
+
+export const defaultChamber3DSettings: Chamber3DSettings = {
+  cameraView: 'front-right',
+  frontDimensionSide: 'front',
+  frontDimensionVisible: true,
+  depthDimensionSide: 'right',
+  depthDimensionVisible: true,
+  heightDimensionCorner: 'front-right',
+  heightDimensionVisible: true,
+  doorWidthDimensionSide: 'above',
+  doorWidthDimensionVisible: true,
+  doorHeightDimensionSide: 'right',
+  doorHeightDimensionVisible: true,
+  floorCutLabelSide: 'front',
+  floorCutDimensionVisible: true
+}
 
 export const doorTypeLabels: Record<DoorType, string> = {
   single: 'распашная одностворчатая',
@@ -41,6 +88,7 @@ export interface ChamberInput {
   doorHeightMm: number
   doorWall: DoorWall
   doorOffsetMm: number
+  view3d: Chamber3DSettings
   doorPrice: number
   doorMountingPrice: number
   equipmentEnabled: boolean
@@ -710,7 +758,12 @@ export function createChamber(partial: Partial<ChamberInput> = {}): ChamberInput
   chamberSeq += 1
   const id =
     typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `chamber-${Date.now()}-${chamberSeq}`
-  return { ...defaultChamberInput, ...partial, id }
+  return {
+    ...defaultChamberInput,
+    ...partial,
+    id,
+    view3d: { ...defaultChamber3DSettings, ...partial.view3d }
+  }
 }
 
 export const defaultChamberInput: ChamberInput = {
@@ -732,6 +785,7 @@ export const defaultChamberInput: ChamberInput = {
   doorHeightMm: 2000,
   doorWall: 'front',
   doorOffsetMm: 0,
+  view3d: defaultChamber3DSettings,
   doorPrice: 0,
   doorMountingPrice: 0,
   equipmentEnabled: false,
