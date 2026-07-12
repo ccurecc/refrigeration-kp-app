@@ -72,7 +72,9 @@ const SEAM_WIDTH_M = 0.018
 const SEAM_FACE_DEPTH_M = 0.012
 const SEAM_FACE_OFFSET_M = 0.002
 const CAMERA_FOV_DEG = 26
-const CAMERA_DISTANCE_FACTOR = 1.42
+const CAMERA_DISTANCE_FACTOR = 1.06
+const PROPOSAL_IMAGE_WIDTH = 1400
+const PROPOSAL_IMAGE_HEIGHT = 760
 const cornerOptions: Array<{ value: DimensionCorner; label: string }> = [
   { value: 'front-left', label: 'Передний левый' },
   { value: 'front-right', label: 'Передний правый' },
@@ -122,6 +124,15 @@ interface DimensionVisibilityToggleProps {
   checked: boolean
   label: string
   onChange: (checked: boolean) => void
+}
+
+interface RangeSettingProps {
+  label: string
+  value: number
+  min: number
+  max: number
+  step: number
+  onChange: (value: number) => void
 }
 
 function DimensionVisibilityToggle({ checked, label, onChange }: DimensionVisibilityToggleProps): JSX.Element {
@@ -181,6 +192,71 @@ function SegmentedSetting<T extends string>({
   )
 }
 
+function RangeSetting({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange
+}: RangeSettingProps): JSX.Element {
+  const [draftValue, setDraftValue] = useState(value)
+  const draftValueRef = useRef(value)
+  const committedValueRef = useRef(value)
+  const progress = ((draftValue - min) / (max - min)) * 100
+
+  useEffect(() => {
+    setDraftValue(value)
+    draftValueRef.current = value
+    committedValueRef.current = value
+  }, [value])
+
+  const commitValue = (): void => {
+    const nextValue = draftValueRef.current
+    if (nextValue !== committedValueRef.current) {
+      committedValueRef.current = nextValue
+      onChange(nextValue)
+    }
+  }
+
+  const resetValue = (): void => {
+    setDraftValue(100)
+    draftValueRef.current = 100
+    if (committedValueRef.current !== 100) {
+      committedValueRef.current = 100
+      onChange(100)
+    }
+  }
+
+  return (
+    <div className="chamber-3d-range-setting" role="group" aria-label={label}>
+      <span className="chamber-3d-range-label">{label}</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={draftValue}
+        aria-label={label}
+        style={{ background: `linear-gradient(to right, var(--green) 0 ${progress}%, #dce4e0 ${progress}% 100%)` }}
+        onChange={(event) => {
+          const nextValue = Number(event.currentTarget.value)
+          draftValueRef.current = nextValue
+          setDraftValue(nextValue)
+        }}
+        onPointerUp={commitValue}
+        onPointerCancel={commitValue}
+        onKeyUp={commitValue}
+        onBlur={commitValue}
+      />
+      <output>{draftValue}%</output>
+      <button type="button" title="Сбросить на 100%" aria-label={`Сбросить ${label}`} disabled={draftValue === 100} onClick={resetValue}>
+        <RotateCcw size={12} />
+      </button>
+    </div>
+  )
+}
+
 export function Chamber3DSettingsPanel({
   input,
   onViewSettingsChange
@@ -196,6 +272,16 @@ export function Chamber3DSettingsPanel({
     input.hasPanelFloor
   )
   const floorCutMm = panelRuns.floor?.hasCut ? panelRuns.floor.remainderMm : null
+  const cameraDistancePercent = Number.isFinite(input.view3d.cameraDistancePercent)
+    ? input.view3d.cameraDistancePercent
+    : 100
+  const floorCutLabelDistancePercent = Number.isFinite(input.view3d.floorCutLabelDistancePercent)
+    ? input.view3d.floorCutLabelDistancePercent
+    : 100
+  const dimensionLabelSizePercent = Number.isFinite(input.view3d.dimensionLabelSizePercent)
+    ? input.view3d.dimensionLabelSizePercent
+    : 100
+  const cutLabelSizePercent = Number.isFinite(input.view3d.cutLabelSizePercent) ? input.view3d.cutLabelSizePercent : 100
   const formatSettingMm = (value: number): string => `${Math.round(value).toLocaleString('ru-RU')} мм`
   const updateViewSetting = <K extends keyof Chamber3DSettings>(key: K, value: Chamber3DSettings[K]): void => {
     onViewSettingsChange({ ...input.view3d, [key]: value })
@@ -216,6 +302,14 @@ export function Chamber3DSettingsPanel({
           value={input.view3d.cameraView}
           options={cameraViewOptions}
           onChange={(value) => updateViewSetting('cameraView', value)}
+        />
+        <RangeSetting
+          label="Дальность камеры в КП"
+          value={cameraDistancePercent}
+          min={5}
+          max={180}
+          step={5}
+          onChange={(value) => updateViewSetting('cameraDistancePercent', value)}
         />
       </section>
 
@@ -259,16 +353,26 @@ export function Chamber3DSettingsPanel({
             onVisibilityChange={(visible) => updateViewSetting('heightDimensionVisible', visible)}
           />
           {floorCutMm !== null ? (
-            <SegmentedSetting<FloorCutLabelSide>
-              label="Подрезка пола"
-              valueLabel={formatSettingMm(floorCutMm)}
-              value={input.view3d.floorCutLabelSide}
-              options={floorCutSideOptions}
-              onChange={(value) => updateViewSetting('floorCutLabelSide', value)}
-              visible={input.view3d.floorCutDimensionVisible}
-              visibilityAriaLabel="Показывать размер подрезки пола"
-              onVisibilityChange={(visible) => updateViewSetting('floorCutDimensionVisible', visible)}
-            />
+            <div className="chamber-3d-floor-cut-settings">
+              <SegmentedSetting<FloorCutLabelSide>
+                label="Подрезка пола"
+                valueLabel={formatSettingMm(floorCutMm)}
+                value={input.view3d.floorCutLabelSide}
+                options={floorCutSideOptions}
+                onChange={(value) => updateViewSetting('floorCutLabelSide', value)}
+                visible={input.view3d.floorCutDimensionVisible}
+                visibilityAriaLabel="Показывать размер подрезки пола"
+                onVisibilityChange={(visible) => updateViewSetting('floorCutDimensionVisible', visible)}
+              />
+              <RangeSetting
+                label="Вынос таблички подрезки"
+                value={floorCutLabelDistancePercent}
+                min={5}
+                max={200}
+                step={5}
+                onChange={(value) => updateViewSetting('floorCutLabelDistancePercent', value)}
+              />
+            </div>
           ) : (
             <div className="chamber-3d-setting is-unavailable">
               <div className="chamber-3d-setting-heading">
@@ -284,6 +388,22 @@ export function Chamber3DSettingsPanel({
               <span>Не требуется для текущего пола</span>
             </div>
           )}
+          <RangeSetting
+            label="Чёрные таблички"
+            value={dimensionLabelSizePercent}
+            min={50}
+            max={200}
+            step={5}
+            onChange={(value) => updateViewSetting('dimensionLabelSizePercent', value)}
+          />
+          <RangeSetting
+            label="Оранжевые таблички"
+            value={cutLabelSizePercent}
+            min={50}
+            max={200}
+            step={5}
+            onChange={(value) => updateViewSetting('cutLabelSizePercent', value)}
+          />
         </div>
       </section>
 
@@ -610,10 +730,23 @@ function drawCutDimensionAnnotations(
   anchors: CutDimensionAnchor[],
   camera: THREE.Camera,
   viewportWidth: number,
-  viewportHeight: number
+  viewportHeight: number,
+  dimensionLabelSizePercent = 100,
+  cutLabelSizePercent = 100,
+  matchProposalImageScale = false
 ): void {
   const uiScale = clamp(Math.min(viewportWidth / 720, viewportHeight / 420), 0.9, 1.65)
-  const dimensionLabelScale = Math.min(uiScale, 22 / 19)
+  const proposalDisplayScale = Math.max(
+    0.2,
+    Math.min(viewportWidth / PROPOSAL_IMAGE_WIDTH, viewportHeight / PROPOSAL_IMAGE_HEIGHT)
+  )
+  const baseDimensionLabelScale = matchProposalImageScale
+    ? (22 / 19) * proposalDisplayScale
+    : Math.min(uiScale, 22 / 19)
+  const baseCutLabelScale = matchProposalImageScale ? 1.65 * proposalDisplayScale : uiScale
+  const dimensionLabelScale =
+    baseDimensionLabelScale * clamp(dimensionLabelSizePercent / 100 || 1, 0.5, 2)
+  const cutLabelScale = baseCutLabelScale * clamp(cutLabelSizePercent / 100 || 1, 0.5, 2)
   const dimensionLabels = collectDimensionLabelAnnotations(
     ctx,
     root,
@@ -626,22 +759,21 @@ function drawCutDimensionAnnotations(
   occupied.push({ x: 8 * uiScale, y: 8 * uiScale, w: 128 * uiScale, h: 48 * uiScale })
   occupied.push({ x: viewportWidth - 104 * uiScale, y: 8 * uiScale, w: 96 * uiScale, h: 48 * uiScale })
 
+  const directionToCamera = camera.getWorldDirection(new THREE.Vector3()).negate().normalize()
   const visible = anchors
     .filter((anchor) => {
-      const midpoint = anchor.start.clone().add(anchor.end).multiplyScalar(0.5)
-      const toCamera = camera.position.clone().sub(midpoint).normalize()
-      const facesCamera = anchor.normal.dot(toCamera) > (anchor.kind === 'floor' ? 0.08 : 0.12)
-      return (
-        facesCamera &&
-        (anchor.kind === 'floor' || !anchor.labelGuide || !isWorldPointOccluded(root, camera, anchor.labelGuide.position))
-      )
+      const facesCamera = anchor.normal.dot(directionToCamera) > (anchor.kind === 'floor' ? 0.08 : 0.12)
+      const facesSelectedSide = anchor.visibilityNormal ? anchor.visibilityNormal.dot(directionToCamera) > 0.08 : true
+      const occlusionPoint = anchor.kind === 'wall' ? anchor.labelGuide?.position : undefined
+      const occluded = occlusionPoint ? isWorldPointOccluded(root, camera, occlusionPoint) : false
+      return facesCamera && facesSelectedSide && !occluded
     })
     .sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'wall' ? -1 : 1))
 
   ctx.save()
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
-  ctx.font = `700 ${11 * uiScale}px Arial, sans-serif`
+  ctx.font = `700 ${11 * cutLabelScale}px Arial, sans-serif`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   const color = '#9a4f12'
@@ -689,8 +821,8 @@ function drawCutDimensionAnnotations(
     const dimStart = { x: start.x + normalX * lineOffset, y: start.y + normalY * lineOffset, z: start.z }
     const dimEnd = { x: end.x + normalX * lineOffset, y: end.y + normalY * lineOffset, z: end.z }
     const dimMid = { x: (dimStart.x + dimEnd.x) / 2, y: (dimStart.y + dimEnd.y) / 2 }
-    const labelW = ctx.measureText(anchor.label).width + 12 * uiScale
-    const labelH = 19 * uiScale
+    const labelW = ctx.measureText(anchor.label).width + 12 * cutLabelScale
+    const labelH = 19 * cutLabelScale
     const candidates: Array<{ x: number; y: number }> = []
     let labelAngle = 0
 
@@ -778,14 +910,14 @@ function drawCutDimensionAnnotations(
     ctx.save()
     ctx.translate(label.x, label.y)
     ctx.rotate(label.angle)
-    roundRect(ctx, -label.w / 2, -label.h / 2, label.w, label.h, 4 * uiScale)
+    roundRect(ctx, -label.w / 2, -label.h / 2, label.w, label.h, 4 * cutLabelScale)
     ctx.fillStyle = 'rgba(255, 250, 244, 0.96)'
     ctx.fill()
     ctx.strokeStyle = color
-    ctx.lineWidth = uiScale
+    ctx.lineWidth = cutLabelScale
     ctx.stroke()
     ctx.fillStyle = color
-    ctx.fillText(label.label, 0, 0.5 * uiScale)
+    ctx.fillText(label.label, 0, 0.5 * cutLabelScale)
     ctx.restore()
   }
 
@@ -913,6 +1045,7 @@ interface CutDimensionAnchor {
   }
   normal: THREE.Vector3
   start: THREE.Vector3
+  visibilityNormal?: THREE.Vector3
 }
 
 interface ScreenBox {
@@ -1608,7 +1741,8 @@ function buildCutDimensionAnchors(input: ChamberInput, metrics: ModelMetrics, th
     const edgeZ = sideSign * (metrics.floorWidthM / 2 + surfaceOffset)
     const dimensionY = 0.08
     const dimensionZ = sideSign * (metrics.widthM / 2 + thicknessM + Math.max(metrics.widthM * 0.11, 0.62))
-    const labelDistanceM = Math.max(metrics.widthM * 0.18, 0.8)
+    const labelDistanceFactor = clamp(input.view3d.floorCutLabelDistancePercent / 100 || 1, 0.05, 2)
+    const labelDistanceM = Math.max(metrics.widthM * 0.18, 0.8) * labelDistanceFactor
 
     anchors.push({
       end: new THREE.Vector3(endX, Math.max(thicknessM * 0.45, 0.025), edgeZ),
@@ -1620,7 +1754,8 @@ function buildCutDimensionAnchors(input: ChamberInput, metrics: ModelMetrics, th
         position: new THREE.Vector3(endX, dimensionY, dimensionZ + sideSign * labelDistanceM)
       },
       normal: new THREE.Vector3(0, 1, 0),
-      start: new THREE.Vector3(startX, Math.max(thicknessM * 0.45, 0.025), edgeZ)
+      start: new THREE.Vector3(startX, Math.max(thicknessM * 0.45, 0.025), edgeZ),
+      visibilityNormal: new THREE.Vector3(0, 0, sideSign)
     })
   }
 
@@ -1723,6 +1858,7 @@ function createChamberModel(input: ChamberInput): {
       start,
       end,
       normal: rotatePoint(anchor.normal).normalize(),
+      visibilityNormal: anchor.visibilityNormal ? rotatePoint(anchor.visibilityNormal).normalize() : undefined,
       labelGuide: anchor.labelGuide
         ? {
             start: rotatePoint(anchor.labelGuide.start),
@@ -1760,6 +1896,40 @@ function configurePerspectiveCamera(camera: THREE.PerspectiveCamera, viewportWid
   camera.updateProjectionMatrix()
 }
 
+function calculateFramingRadius(
+  group: THREE.Object3D,
+  target: THREE.Vector3,
+  cutDimensions: CutDimensionAnchor[],
+  fallbackRadiusM: number
+): number {
+  group.updateWorldMatrix(true, true)
+  const bounds = new THREE.Box3().setFromObject(group)
+  const points: THREE.Vector3[] = []
+
+  if (!bounds.isEmpty()) {
+    for (const x of [bounds.min.x, bounds.max.x]) {
+      for (const y of [bounds.min.y, bounds.max.y]) {
+        for (const z of [bounds.min.z, bounds.max.z]) {
+          points.push(new THREE.Vector3(x, y, z))
+        }
+      }
+    }
+  }
+
+  for (const anchor of cutDimensions) {
+    points.push(anchor.start, anchor.end)
+    if (anchor.labelGuide) {
+      points.push(anchor.labelGuide.start, anchor.labelGuide.end, anchor.labelGuide.position)
+    }
+  }
+
+  const contentRadiusM = points.reduce(
+    (radius, point) => Math.max(radius, point.distanceTo(target)),
+    fallbackRadiusM
+  )
+  return contentRadiusM * 1.04
+}
+
 function placeCamera(
   camera: THREE.PerspectiveCamera,
   target: THREE.Vector3,
@@ -1770,7 +1940,7 @@ function placeCamera(
   const verticalFov = THREE.MathUtils.degToRad(camera.fov)
   const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect)
   const limitingHalfFov = Math.min(verticalFov, horizontalFov) / 2
-  const distance = Math.max((modelRadiusM / Math.sin(limitingHalfFov)) * distanceFactor, 3.5)
+  const distance = Math.max((modelRadiusM / Math.sin(limitingHalfFov)) * distanceFactor, 0.5)
   const wall = cameraView.split('-')[0] as 'front' | 'right' | 'back' | 'left'
   const wallNormal =
     wall === 'front'
@@ -1795,7 +1965,7 @@ export function renderChamber3DToDataUrl(
   input: ChamberInput,
   width = 1400,
   height = 760,
-  cameraDistanceFactor = 1.14
+  cameraDistanceFactor = 1.06
 ): string {
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(0xeef2f5)
@@ -1806,6 +1976,8 @@ export function renderChamber3DToDataUrl(
   const maxSideM = Math.max(metrics.lengthM, metrics.widthM, metrics.totalHeightM)
   const modelRadiusM = Math.sqrt(metrics.lengthM ** 2 + metrics.widthM ** 2 + metrics.totalHeightM ** 2) / 2
   const target = new THREE.Vector3(0, metrics.totalHeightM * 0.48, 0)
+  const framingRadiusM = calculateFramingRadius(group, target, cutDimensions, modelRadiusM)
+  const cameraDistanceScale = clamp(input.view3d.cameraDistancePercent / 100 || 1, 0.05, 1.8)
   const camera = new THREE.PerspectiveCamera(CAMERA_FOV_DEG, width / height, 0.03, Math.max(80, maxSideM * 12))
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true })
 
@@ -1816,7 +1988,7 @@ export function renderChamber3DToDataUrl(
   addSceneLights(scene, maxSideM)
   addGround(scene, maxSideM)
   configurePerspectiveCamera(camera, width, height)
-  placeCamera(camera, target, modelRadiusM, input.view3d.cameraView, cameraDistanceFactor)
+  placeCamera(camera, target, framingRadiusM, input.view3d.cameraView, cameraDistanceFactor * cameraDistanceScale)
   layoutDimensionLabels(scene, camera, width, height)
   renderer.render(scene, camera)
 
@@ -1826,7 +1998,16 @@ export function renderChamber3DToDataUrl(
   const compositeContext = composite.getContext('2d')
   if (compositeContext) {
     compositeContext.drawImage(renderer.domElement, 0, 0, width, height)
-    drawCutDimensionAnnotations(compositeContext, scene, cutDimensions, camera, width, height)
+    drawCutDimensionAnnotations(
+      compositeContext,
+      scene,
+      cutDimensions,
+      camera,
+      width,
+      height,
+      input.view3d.dimensionLabelSizePercent,
+      input.view3d.cutLabelSizePercent
+    )
   }
   const dataUrl = compositeContext ? composite.toDataURL('image/png') : renderer.domElement.toDataURL('image/png')
   renderer.dispose()
@@ -1871,17 +2052,22 @@ export function Chamber3DSettingsEditor({
   input,
   onClose,
   onViewSettingsChange,
-  pdfCameraDistanceFactor = 0.92
+  pdfCameraDistanceFactor = 1.06
 }: Chamber3DSettingsEditorProps): JSX.Element {
   const [pdfPreview, setPdfPreview] = useState<string | null>(null)
   const [pdfPreviewError, setPdfPreviewError] = useState(false)
+  const [fullscreenPreview, setFullscreenPreview] = useState<'interactive' | 'pdf' | null>(null)
 
   useEffect(() => {
     document.body.classList.add('view3d-editor-open')
 
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
-        onClose()
+        if (fullscreenPreview) {
+          setFullscreenPreview(null)
+        } else {
+          onClose()
+        }
       }
     }
 
@@ -1891,7 +2077,7 @@ export function Chamber3DSettingsEditor({
       window.removeEventListener('keydown', onKeyDown)
       document.body.classList.remove('view3d-editor-open')
     }
-  }, [onClose])
+  }, [fullscreenPreview, onClose])
 
   useEffect(() => {
     let disposed = false
@@ -1939,7 +2125,9 @@ export function Chamber3DSettingsEditor({
         </div>
 
         <div className="chamber-3d-editor-previews">
-          <section className="chamber-3d-editor-preview-card is-interactive">
+          <section
+            className={`chamber-3d-editor-preview-card is-interactive${fullscreenPreview === 'interactive' ? ' is-fullscreen' : ''}`}
+          >
             <div className="chamber-3d-editor-preview-heading">
               <div>
                 <span className="chamber-3d-editor-preview-icon" aria-hidden="true">
@@ -1958,10 +2146,19 @@ export function Chamber3DSettingsEditor({
                 showSettingsControl={false}
                 allowFullscreen={false}
               />
+              <button
+                className="chamber-3d-preview-fullscreen-button is-interactive"
+                type="button"
+                title={fullscreenPreview === 'interactive' ? 'Свернуть интерактивную модель' : 'Развернуть интерактивную модель'}
+                aria-label={fullscreenPreview === 'interactive' ? 'Свернуть интерактивную модель' : 'Развернуть интерактивную модель'}
+                onClick={() => setFullscreenPreview((value) => (value === 'interactive' ? null : 'interactive'))}
+              >
+                {fullscreenPreview === 'interactive' ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+              </button>
             </div>
           </section>
 
-          <section className="chamber-3d-editor-preview-card is-pdf">
+          <section className={`chamber-3d-editor-preview-card is-pdf${fullscreenPreview === 'pdf' ? ' is-fullscreen' : ''}`}>
             <div className="chamber-3d-editor-preview-heading">
               <div>
                 <span className="chamber-3d-editor-preview-icon" aria-hidden="true">
@@ -1982,6 +2179,15 @@ export function Chamber3DSettingsEditor({
               ) : (
                 <p>Формируем изображение…</p>
               )}
+              <button
+                className="chamber-3d-preview-fullscreen-button"
+                type="button"
+                title={fullscreenPreview === 'pdf' ? 'Свернуть изображение в КП' : 'Развернуть изображение в КП'}
+                aria-label={fullscreenPreview === 'pdf' ? 'Свернуть изображение в КП' : 'Развернуть изображение в КП'}
+                onClick={() => setFullscreenPreview((value) => (value === 'pdf' ? null : 'pdf'))}
+              >
+                {fullscreenPreview === 'pdf' ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+              </button>
             </div>
           </section>
         </div>
@@ -2048,6 +2254,8 @@ export function Chamber3DView({
     const maxSideM = Math.max(metrics.lengthM, metrics.widthM, metrics.totalHeightM)
     const modelRadiusM = Math.sqrt(metrics.lengthM ** 2 + metrics.widthM ** 2 + metrics.totalHeightM ** 2) / 2
     const target = new THREE.Vector3(0, metrics.totalHeightM * 0.48, 0)
+    const framingRadiusM = calculateFramingRadius(group, target, cutDimensions, modelRadiusM)
+    const cameraDistanceScale = clamp(input.view3d.cameraDistancePercent / 100 || 1, 0.05, 1.8)
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true })
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
     renderer.outputColorSpace = THREE.SRGBColorSpace
@@ -2061,14 +2269,14 @@ export function Chamber3DView({
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
     controls.dampingFactor = 0.08
-    controls.minDistance = Math.max(modelRadiusM * 0.7, 1)
-    controls.maxDistance = Math.max(modelRadiusM * 5, 6)
+    controls.minDistance = 0.5
+    controls.maxDistance = Math.max(framingRadiusM * 12, 6)
     controls.maxPolarAngle = Math.PI * 0.92
     controls.minPolarAngle = Math.PI * 0.04
     controls.target.copy(target)
 
     const resetCamera = (): void => {
-      placeCamera(camera, target, modelRadiusM, input.view3d.cameraView, CAMERA_DISTANCE_FACTOR)
+      placeCamera(camera, target, framingRadiusM, input.view3d.cameraView, CAMERA_DISTANCE_FACTOR * cameraDistanceScale)
       controls.target.copy(target)
       controls.update()
     }
@@ -2122,7 +2330,17 @@ export function Chamber3DView({
         const pixelRatio = annotationCanvas.width / Math.max(width, 1)
         annotationContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
         annotationContext.clearRect(0, 0, width, height)
-        drawCutDimensionAnnotations(annotationContext, scene, cutDimensions, camera, width, height)
+        drawCutDimensionAnnotations(
+          annotationContext,
+          scene,
+          cutDimensions,
+          camera,
+          width,
+          height,
+          input.view3d.dimensionLabelSizePercent,
+          input.view3d.cutLabelSizePercent,
+          true
+        )
       }
       frameId = window.requestAnimationFrame(render)
     })

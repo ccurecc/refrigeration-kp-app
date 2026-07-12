@@ -52,7 +52,7 @@ const moneyFormatter = new Intl.NumberFormat('ru-RU', {
   currency: 'RUB'
 })
 const numberFormatter = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 })
-const PROPOSAL_PDF_3D_CAMERA_DISTANCE_FACTOR = 0.92
+const PROPOSAL_PDF_3D_CAMERA_DISTANCE_FACTOR = 1.06
 
 const formatMoney = (value: number): string => moneyFormatter.format(value)
 const formatNumber = (value: number): string => numberFormatter.format(value)
@@ -149,6 +149,10 @@ function restoreCameraView(value: string | undefined): CameraView {
   return 'front-right'
 }
 
+function restorePercent(value: number | undefined, min: number, max: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.min(Math.max(Math.round(value), min), max) : 100
+}
+
 function restoreChamber(chamber: RestorableChamber, createNewId = false): ChamberInput {
   const { dimensionCorner: legacyCorner, ...currentChamber } = chamber
   const legacyView3d = legacyCorner
@@ -166,9 +170,13 @@ function restoreChamber(chamber: RestorableChamber, createNewId = false): Chambe
         ...legacyView3d,
         ...currentChamber.view3d,
         cameraView: restoreCameraView(currentChamber.view3d?.cameraView),
+        cameraDistancePercent: restorePercent(currentChamber.view3d?.cameraDistancePercent, 5, 180),
+        dimensionLabelSizePercent: restorePercent(currentChamber.view3d?.dimensionLabelSizePercent, 50, 200),
+        cutLabelSizePercent: restorePercent(currentChamber.view3d?.cutLabelSizePercent, 50, 200),
         frontDimensionVisible: currentChamber.view3d?.frontDimensionVisible ?? true,
         depthDimensionVisible: currentChamber.view3d?.depthDimensionVisible ?? true,
         heightDimensionVisible: currentChamber.view3d?.heightDimensionVisible ?? true,
+        floorCutLabelDistancePercent: restorePercent(currentChamber.view3d?.floorCutLabelDistancePercent, 5, 200),
         floorCutDimensionVisible: currentChamber.view3d?.floorCutDimensionVisible ?? true,
         doorWidthDimensionVisible: currentChamber.view3d?.doorWidthDimensionVisible ?? true,
         doorHeightDimensionVisible: currentChamber.view3d?.doorHeightDimensionVisible ?? true
@@ -406,7 +414,7 @@ export function App(): JSX.Element {
       const saveResult = await window.fwApp.saveCalculation({
         defaultName: defaultFileName(chambers, proposal),
         data: {
-          version: 6,
+          version: 8,
           savedAt: new Date().toISOString(),
           proposal,
           company,
@@ -515,7 +523,12 @@ export function App(): JSX.Element {
         let side3dImageDataUrl = ''
 
         try {
-          side3dImageDataUrl = renderChamber3DToDataUrl(chamber.input, 1700, 1700)
+          side3dImageDataUrl = renderChamber3DToDataUrl(
+            chamber.input,
+            1700,
+            923,
+            PROPOSAL_PDF_3D_CAMERA_DISTANCE_FACTOR
+          )
         } catch {
           side3dImageDataUrl = ''
         }

@@ -26,6 +26,9 @@ export type FloorCutLabelSide = 'front' | 'back'
 
 export interface Chamber3DSettings {
   cameraView: CameraView
+  cameraDistancePercent: number
+  dimensionLabelSizePercent: number
+  cutLabelSizePercent: number
   frontDimensionSide: FrontDimensionSide
   frontDimensionVisible: boolean
   depthDimensionSide: DepthDimensionSide
@@ -37,11 +40,15 @@ export interface Chamber3DSettings {
   doorHeightDimensionSide: DoorHeightDimensionSide
   doorHeightDimensionVisible: boolean
   floorCutLabelSide: FloorCutLabelSide
+  floorCutLabelDistancePercent: number
   floorCutDimensionVisible: boolean
 }
 
 export const defaultChamber3DSettings: Chamber3DSettings = {
   cameraView: 'front-right',
+  cameraDistancePercent: 100,
+  dimensionLabelSizePercent: 100,
+  cutLabelSizePercent: 100,
   frontDimensionSide: 'front',
   frontDimensionVisible: true,
   depthDimensionSide: 'right',
@@ -53,6 +60,7 @@ export const defaultChamber3DSettings: Chamber3DSettings = {
   doorHeightDimensionSide: 'right',
   doorHeightDimensionVisible: true,
   floorCutLabelSide: 'front',
+  floorCutLabelDistancePercent: 100,
   floorCutDimensionVisible: true
 }
 

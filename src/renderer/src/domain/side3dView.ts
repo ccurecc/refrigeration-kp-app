@@ -21,8 +21,13 @@ function line(start: Point, end: Point, cls = 'dim-line'): string {
   return `<line class="${cls}" x1="${n(start.x)}" y1="${n(start.y)}" x2="${n(end.x)}" y2="${n(end.y)}" />`
 }
 
-function text(point: Point, value: string, anchor: 'start' | 'middle' | 'end' = 'middle'): string {
-  return `<text class="dim-text" x="${n(point.x)}" y="${n(point.y)}" text-anchor="${anchor}">${value}</text>`
+function text(
+  point: Point,
+  value: string,
+  anchor: 'start' | 'middle' | 'end' = 'middle',
+  className = 'dim-text'
+): string {
+  return `<text class="${className}" x="${n(point.x)}" y="${n(point.y)}" text-anchor="${anchor}">${value}</text>`
 }
 
 function dim(start: Point, end: Point, label: string, labelOffset: Point = { x: 0, y: -8 }): string {
@@ -42,7 +47,7 @@ function cutDim(start: Point, end: Point, label: string, offset: Point, labelOff
     dimStart,
     dimEnd,
     'cut-dim-line'
-  )}${text(mid, label)}`
+  )}${text(mid, label, 'middle', 'cut-dim-text')}`
 }
 
 function cutDimWithLabel(start: Point, end: Point, label: string, labelPosition: Point): string {
@@ -55,7 +60,7 @@ function cutDimWithLabel(start: Point, end: Point, label: string, labelPosition:
     dimStart,
     dimEnd,
     'cut-dim-line'
-  )}${line(dimMid, labelPosition, 'cut-extension')}${text(labelPosition, label)}`
+  )}${line(dimMid, labelPosition, 'cut-extension')}${text(labelPosition, label, 'middle', 'cut-dim-text')}`
 }
 
 export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): string {
@@ -73,6 +78,9 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
   const viewDepthMm = isSideFront ? longMm : shortMm
   const cameraWall = input.view3d.cameraView.split('-')[0]
   const cameraOffset = input.view3d.cameraView.endsWith('-left') ? -0.42 : 0.42
+  const dimensionLabelFontSize =
+    13 * Math.min(Math.max((input.view3d.dimensionLabelSizePercent || 100) / 100, 0.5), 2)
+  const cutLabelFontSize = 13 * Math.min(Math.max((input.view3d.cutLabelSizePercent || 100) / 100, 0.5), 2)
   const cameraNormal =
     cameraWall === 'front'
       ? { x: 0, z: -1 }
@@ -90,7 +98,10 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
   const height = 430
   const depthX = 0.36
   const depthY = 0.22
-  const scale = Math.min(560 / (viewFrontMm + viewDepthMm * depthX), 265 / (heightMm + viewDepthMm * depthY))
+  const cameraDistanceFactor = Math.min(Math.max((input.view3d.cameraDistancePercent || 100) / 100, 0.05), 1.8)
+  const scale =
+    Math.min(560 / (viewFrontMm + viewDepthMm * depthX), 265 / (heightMm + viewDepthMm * depthY)) /
+    cameraDistanceFactor
   const ox = 82
   const oy = 354
 
@@ -365,7 +376,12 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
   const shortWallCutDim = wallCutDim(adjacentRightWall[doorSpan.wall], false)
   const floorCutBack = input.view3d.floorCutLabelSide === 'back'
   const floorCutDimensionZ = floorCutBack ? thicknessMm + floorShortMm : thicknessMm
-  const floorCutLabelZ = floorCutDimensionZ + (floorCutBack ? 1 : -1) * Math.max(shortMm * 0.18, 700)
+  const floorCutLabelDistanceFactor = Math.min(
+    Math.max((input.view3d.floorCutLabelDistancePercent || 100) / 100, 0.05),
+    2
+  )
+  const floorCutLabelZ =
+    floorCutDimensionZ + (floorCutBack ? 1 : -1) * Math.max(shortMm * 0.18, 700) * floorCutLabelDistanceFactor
   const floorCutLabelPosition = p(floorCutEndMm, 0, floorCutLabelZ)
   const floorCutDim = input.view3d.floorCutDimensionVisible && panelRuns.floor?.hasCut
     ? cutDimWithLabel(
@@ -393,7 +409,8 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
         .door-rail { stroke: #4c5961; stroke-width: 12; stroke-linecap: square; }
         .door-rail-highlight { stroke: #b9c2c7; stroke-width: 3; stroke-linecap: square; }
         .door-rail-bolt { fill: #124837; stroke: #e7ecef; stroke-width: 1; }
-        .dim-text { font: 700 13px Arial, sans-serif; fill: #163246; stroke: #fff; stroke-width: 4px; paint-order: stroke; }
+        .dim-text { font: 700 ${n(dimensionLabelFontSize)}px Arial, sans-serif; fill: #163246; stroke: #fff; stroke-width: 4px; paint-order: stroke; }
+        .cut-dim-text { font: 700 ${n(cutLabelFontSize)}px Arial, sans-serif; fill: #9a4f12; stroke: #fff; stroke-width: 4px; paint-order: stroke; }
       </style>
       <rect width="${width}" height="${height}" fill="#eef2f5" />
       ${polygon(backWall, '#dbe6ee', '#234f6c', 0.86)}

@@ -383,11 +383,9 @@ function visualChamberBlock(
       </header>
       <div class="visual-grid">
         <figure class="visual-figure-3d">
-          <figcaption>3D-вид</figcaption>
           ${side3d}
         </figure>
         <figure class="visual-figure-top">
-          <figcaption>Вид сверху</figcaption>
           ${topViewSvg(chamber.input, chamber.result)}
         </figure>
       </div>
@@ -410,11 +408,17 @@ export function buildVisualsPdfHtml({ chambers, company, customer, proposal }: V
     <meta charset="utf-8" />
     <title>${title}</title>
     <style>
-      @page { size: A4 landscape; margin: 4mm; }
+      @page { size: A4 portrait; margin: 0; }
       * { box-sizing: border-box; }
-      html, body { width: 289mm; min-height: 202mm; }
+      html, body { width: 210mm; min-height: 297mm; }
       body { margin: 0; color: #1f2933; font-family: Arial, Helvetica, sans-serif; font-size: 10px; line-height: 1.15; }
-      .visual-page { height: 202mm; page-break-after: always; overflow: hidden; }
+      .visual-page {
+        width: 210mm;
+        height: 297mm;
+        padding: 10mm;
+        page-break-after: always;
+        overflow: hidden;
+      }
       .visual-page:last-child { page-break-after: auto; }
       .visual-page-head {
         display: flex;
@@ -429,7 +433,12 @@ export function buildVisualsPdfHtml({ chambers, company, customer, proposal }: V
       .visual-page-head strong { display: block; color: #1d6b55; font-size: 12px; line-height: 1.05; }
       .visual-page-head span { display: block; margin-top: 1mm; white-space: nowrap; }
       .visual-page-head .right { flex: 0 0 58mm; text-align: right; }
-      .visual-grid { display: grid; grid-template-columns: 1fr 1.08fr; gap: 3mm; height: 188mm; }
+      .visual-grid {
+        display: grid;
+        grid-template-rows: 1.04fr 1fr;
+        gap: 3mm;
+        height: 263mm;
+      }
       figure {
         position: relative;
         display: block;
@@ -437,19 +446,6 @@ export function buildVisualsPdfHtml({ chambers, company, customer, proposal }: V
         margin: 0;
         break-inside: avoid;
         overflow: hidden;
-      }
-      figcaption {
-        position: absolute;
-        top: 2mm;
-        left: 2mm;
-        z-index: 2;
-        margin: 0;
-        padding: 1.1mm 2mm;
-        border: 1px solid rgba(207, 214, 221, 0.9);
-        background: rgba(255, 255, 255, 0.88);
-        color: #124837;
-        font-size: 11px;
-        font-weight: 700;
       }
       figure img, figure svg {
         display: block;
