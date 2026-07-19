@@ -184,6 +184,7 @@ export function buildProposalHtml({
   const today = new Date().toLocaleDateString('ru-RU')
   const detailed = proposalMode === 'detailed'
   const proposalType = 'Коммерческое предложение'
+  const proposalHeader = proposal.headerText.trim()
   const validUntil = proposal.validUntil ? new Date(`${proposal.validUntil}T00:00:00`).toLocaleDateString('ru-RU') : ''
   const proposalNote = proposal.note.trim()
 
@@ -204,8 +205,8 @@ export function buildProposalHtml({
       .page-kicker { display: block; margin-bottom: 4px; color: #f37021; font-size: 9px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
       .topline { padding-bottom: 8px; border-bottom: 1px solid #dfe5e2; color: #617083; text-align: center; font-size: 9px; }
       .header { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; margin-top: 18px; }
-      .logo { max-width: 95mm; color: #1d6b55; font-size: 30px; font-weight: 800; line-height: 1.1; }
-      .meta { text-align: right; font-size: 11px; }
+      .logo { max-width: 95mm; color: #111; font-size: 11px; font-weight: 400; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .meta { grid-column: 2; text-align: right; font-size: 11px; }
       .meta div { margin-bottom: 5px; }
       h1 { margin: 0; color: #f37021; font-size: 24px; line-height: 1.15; text-align: center; text-transform: uppercase; }
       h2.chamber-title { margin: 0; color: #124837; font-size: 18px; line-height: 1.2; }
@@ -268,7 +269,7 @@ export function buildProposalHtml({
     <section class="pdf-page cover-page">
       <div class="topline">${companyTopLine(company)}</div>
       <header class="header">
-        <div class="logo">${valueOrLine(company.brandName, 'Компания')}</div>
+        ${proposalHeader ? `<div class="logo">${escapeHtml(proposalHeader)}</div>` : ''}
         <div class="meta">
           <div><strong>№:</strong> ${valueOrLine(proposal.number, 'КП 001')} / ${today}</div>
           ${validUntil ? `<div><strong>Действует до:</strong> ${validUntil}</div>` : ''}
@@ -395,7 +396,7 @@ function visualChamberBlock(
 export function buildVisualsPdfHtml({ chambers, company, customer, proposal }: VisualsPdfInput): string {
   const today = new Date().toLocaleDateString('ru-RU')
   const title = proposal.number.trim() ? `Визуализации ${escapeHtml(proposal.number.trim())}` : 'Визуализации камер'
-  const companyName = company.brandName || company.legalName || 'Компания'
+  const companyName = company.legalName || 'Компания'
   const buyerLabel = customer.name.trim() ? `Покупатель: ${escapeHtml(customer.name.trim())}` : 'Покупатель не указан'
   const blocks = chambers
     .map((chamber, index) => visualChamberBlock(chamber, index, chambers.length, title, companyName, buyerLabel, today))

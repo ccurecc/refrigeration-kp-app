@@ -56,12 +56,8 @@ export function SettingsModal({
         <div className="modal-body">
           <section className="settings-group">
             <h3>Реквизиты компании</h3>
-            <p className="hint-text">Подставляются в шапку PDF. Сохраняются автоматически.</p>
+            <p className="hint-text">Подставляются в реквизиты PDF. Сохраняются автоматически.</p>
             <div className="field-grid two-columns">
-              <label>
-                Название в шапке
-                <input value={company.brandName} onChange={(event) => onCompanyChange('brandName', event.target.value)} />
-              </label>
               <label>
                 Юр. название
                 <input value={company.legalName} onChange={(event) => onCompanyChange('legalName', event.target.value)} />

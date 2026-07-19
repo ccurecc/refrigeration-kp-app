@@ -1,5 +1,4 @@
 export interface CompanySettings {
-  brandName: string
   legalName: string
   legalAddress: string
   inn: string
@@ -21,6 +20,7 @@ export interface CustomerData {
 export interface ProposalSettings {
   number: string
   validUntil: string
+  headerText: string
   note: string
 }
 
@@ -53,7 +53,6 @@ export interface AppSettings {
 }
 
 export const defaultCompanySettings: CompanySettings = {
-  brandName: 'ИП Камышанов Александр',
   legalName: 'ИП Камышанов Александр',
   legalAddress: '',
   inn: '',
@@ -75,6 +74,7 @@ export const defaultCustomerData: CustomerData = {
 export const defaultProposalSettings: ProposalSettings = {
   number: 'КП 001',
   validUntil: '',
+  headerText: '',
   note: ''
 }
 

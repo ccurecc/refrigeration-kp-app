@@ -382,6 +382,7 @@ input:disabled {
   color: #9aa3ad;
 }
 
+.proposal-header-input,
 .proposal-note-input {
   min-height: 104px;
   padding: 10px 11px;

@@ -64,19 +64,16 @@ function createId(): string {
   return `row-${Date.now()}-${Math.round(Math.random() * 1e6)}`
 }
 
-// Settings saved before the rename still carry the old placeholder brand name.
-// Replace stale placeholders with the current defaults so they don't override them.
-const STALE_BRAND_NAMES = new Set(['FrozenWest КП', 'FrozenWest', 'Название компании', ''])
 const STALE_LEGAL_NAMES = new Set(['Название компании', ''])
 
-function migrateCompany(saved: Partial<CompanySettings> | undefined): Partial<CompanySettings> {
+function migrateCompany(
+  saved: (Partial<CompanySettings> & { brandName?: string }) | undefined
+): Partial<CompanySettings> {
   if (!saved) {
     return {}
   }
   const next = { ...saved }
-  if (next.brandName !== undefined && STALE_BRAND_NAMES.has(next.brandName.trim())) {
-    next.brandName = defaultCompanySettings.brandName
-  }
+  delete next.brandName
   if (next.legalName !== undefined && STALE_LEGAL_NAMES.has(next.legalName.trim())) {
     next.legalName = defaultCompanySettings.legalName
   }
@@ -414,7 +411,7 @@ export function App(): JSX.Element {
       const saveResult = await window.fwApp.saveCalculation({
         defaultName: defaultFileName(chambers, proposal),
         data: {
-          version: 8,
+          version: 9,
           savedAt: new Date().toISOString(),
           proposal,
           company,
@@ -569,7 +566,7 @@ export function App(): JSX.Element {
             <Snowflake size={26} strokeWidth={2.4} />
           </div>
           <div className="topbar-title">
-            <strong>{company.brandName || 'FrozenWest КП'}</strong>
+            <strong>{company.legalName || 'Коммерческое предложение'}</strong>
             <span>
               {proposal.number || 'КП'} · {customer.name || 'покупатель не указан'}
             </span>
@@ -615,6 +612,16 @@ export function App(): JSX.Element {
                 />
               </label>
             </div>
+            <label>
+              Шапка документа
+              <textarea
+                className="proposal-header-input"
+                placeholder={'ИП Камышанов А. А.\nКоммерческое предложение\nПриложение к договору №…'}
+                value={proposal.headerText}
+                onChange={(event) => updateProposal('headerText', event.target.value)}
+              />
+            </label>
+            <p className="hint-text">Выводится слева вверху PDF. Если поле пустое, блок не показывается. Переносы строк сохраняются.</p>
             <div className="field-grid two-columns">
               <label>
                 Покупатель
