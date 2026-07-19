@@ -1856,6 +1856,13 @@ tbody tr:last-child td {
   filter: drop-shadow(0 2px 3px rgba(90, 35, 27, 0.25));
 }
 
+.door-editor-rail {
+  fill: #586873;
+  stroke: #263842;
+  stroke-width: 2;
+  stroke-dasharray: 7 4;
+}
+
 .door-editor-grip {
   pointer-events: none;
   stroke: #fff;

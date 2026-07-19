@@ -584,7 +584,7 @@ export function calculateChamber(input: ChamberInput, pricing: CalculationPricin
   if (chamberMountingCost > 0) {
     materialRows.push({
       id: 'chamber-mounting',
-      name: 'Монтаж камеры с расходниками',
+      name: 'Монтаж камеры',
       unit: 'м²',
       amountPerChamber: round2(wallAreaM2 + floorAreaM2 + ceilingAreaM2),
       amountTotal: round2((wallAreaM2 + floorAreaM2 + ceilingAreaM2) * quantity),

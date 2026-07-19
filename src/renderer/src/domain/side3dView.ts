@@ -79,8 +79,8 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
   const cameraWall = input.view3d.cameraView.split('-')[0]
   const cameraOffset = input.view3d.cameraView.endsWith('-left') ? -0.42 : 0.42
   const dimensionLabelFontSize =
-    13 * Math.min(Math.max((input.view3d.dimensionLabelSizePercent || 100) / 100, 0.5), 2)
-  const cutLabelFontSize = 13 * Math.min(Math.max((input.view3d.cutLabelSizePercent || 100) / 100, 0.5), 2)
+    18 * Math.min(Math.max((input.view3d.dimensionLabelSizePercent || 100) / 100, 0.5), 2)
+  const cutLabelFontSize = 18 * Math.min(Math.max((input.view3d.cutLabelSizePercent || 100) / 100, 0.5), 2)
   const cameraNormal =
     cameraWall === 'front'
       ? { x: 0, z: -1 }
@@ -139,6 +139,14 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
   const mirrorDoorSpan = doorSpan.wall === 'front' || doorSpan.wall === 'left'
   const doorLeftMm = mirrorDoorSpan ? doorSpan.wallSpanMm - doorSpan.rightMm : doorSpan.leftMm
   const doorRightMm = mirrorDoorSpan ? doorSpan.wallSpanMm - doorSpan.leftMm : doorSpan.rightMm
+  const railStartMm = mirrorDoorSpan ? doorSpan.wallSpanMm - doorSpan.railEndMm : doorSpan.railStartMm
+  const railEndMm = mirrorDoorSpan ? doorSpan.wallSpanMm - doorSpan.railStartMm : doorSpan.railEndMm
+  const railExtensionStartMm = mirrorDoorSpan
+    ? doorSpan.wallSpanMm - doorSpan.railExtensionEndMm
+    : doorSpan.railExtensionStartMm
+  const railExtensionEndMm = mirrorDoorSpan
+    ? doorSpan.wallSpanMm - doorSpan.railExtensionStartMm
+    : doorSpan.railExtensionEndMm
   const physicalFrontWall = [p(0, 0, 0), p(longMm, 0, 0), p(longMm, wallHeightMm, 0), p(0, wallHeightMm, 0)]
   const physicalRightWall = [p(longMm, 0, 0), p(longMm, 0, shortMm), p(longMm, wallHeightMm, shortMm), p(longMm, wallHeightMm, 0)]
   const physicalBackWall = [p(0, 0, shortMm), p(longMm, 0, shortMm), p(longMm, wallHeightMm, shortMm), p(0, wallHeightMm, shortMm)]
@@ -309,7 +317,14 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
       )
     : ''
   const doorCenterMm = (doorLeftMm + doorRightMm) / 2
-  const doorHandleX = input.doorType === 'double' ? doorCenterMm - doorWidthMm * 0.075 : doorCenterMm + doorWidthMm * 0.34
+  const slideAlongDirection =
+    (railExtensionStartMm + railExtensionEndMm) / 2 >= doorCenterMm ? 1 : -1
+  const doorHandleX =
+    input.doorType === 'double'
+      ? doorCenterMm - doorWidthMm * 0.075
+      : input.doorType === 'sliding'
+        ? doorCenterMm - slideAlongDirection * doorWidthMm * 0.34
+        : doorCenterMm + doorWidthMm * 0.34
   const doorHandle = dp(doorHandleX, doorHeightMm * 0.52, 82)
   const doorHandleSvg = `<circle cx="${doorHandle.x.toFixed(1)}" cy="${doorHandle.y.toFixed(1)}" r="5" fill="#124837" stroke="#0b3327" stroke-width="1.5" />`
   const doorWindowWidthMm = doorWidthMm * 0.23
@@ -327,19 +342,35 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
       ? `${line(dp(doorCenterMm, 0, 48), dp(doorCenterMm, doorHeightMm, 48), 'door-leaf-seam')}${doorHandleSvg}`
       : ''
   const slidingRailInsetMm = Math.min(Math.max(doorHeightMm * 0.025, 20), doorHeightMm / 2)
-  const detailedSlidingRail = (railY: number): string => {
-    const start = dp(doorLeftMm, railY, 68)
-    const end = dp(doorRightMm, railY, 68)
-    const leftBolt = dp(doorLeftMm + doorWidthMm * 0.3, railY, 78)
-    const rightBolt = dp(doorRightMm - doorWidthMm * 0.3, railY, 78)
+  const detailedSlidingRail = (railY: number, railStartMm: number, railEndMm: number): string => {
+    const start = dp(railStartMm, railY, 68)
+    const end = dp(railEndMm, railY, 68)
+    const railWidthMm = railEndMm - railStartMm
+    const leftBolt = dp(railStartMm + railWidthMm * 0.3, railY, 78)
+    const rightBolt = dp(railEndMm - railWidthMm * 0.3, railY, 78)
 
     return `${line(start, end, 'door-rail')}${line(start, end, 'door-rail-highlight')}<circle cx="${leftBolt.x.toFixed(1)}" cy="${leftBolt.y.toFixed(1)}" r="2.7" class="door-rail-bolt" /><circle cx="${rightBolt.x.toFixed(1)}" cy="${rightBolt.y.toFixed(1)}" r="2.7" class="door-rail-bolt" />`
   }
+  const slidingRailCarriers = [doorCenterMm - doorWidthMm * 0.32, doorCenterMm + doorWidthMm * 0.32]
+    .map((carrierX) =>
+      line(
+        dp(carrierX, doorHeightMm * 0.95, 74),
+        dp(carrierX, doorHeightMm + slidingRailInsetMm, 74),
+        'door-rail-carrier'
+      )
+    )
+    .join('')
   const slidingDoorDetails =
     input.doorType === 'sliding'
-      ? `${detailedSlidingRail(slidingRailInsetMm)}${detailedSlidingRail(
-          doorHeightMm + slidingRailInsetMm
-        )}${doorHandleSvg}`
+      ? `${detailedSlidingRail(
+          doorHeightMm + slidingRailInsetMm,
+          railStartMm,
+          railEndMm
+        )}${detailedSlidingRail(
+          doorHeightMm * 0.18,
+          railExtensionStartMm,
+          railExtensionEndMm
+        )}${slidingRailCarriers}${doorHandleSvg}`
       : ''
   const singleDoorDetails =
     input.doorType === 'single' ? `${polygon(doorWindow, '#bfd9e5', '#52788b', 0.9)}${doorHandleSvg}` : ''
@@ -409,6 +440,7 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
         .door-rail { stroke: #4c5961; stroke-width: 12; stroke-linecap: square; }
         .door-rail-highlight { stroke: #b9c2c7; stroke-width: 3; stroke-linecap: square; }
         .door-rail-bolt { fill: #124837; stroke: #e7ecef; stroke-width: 1; }
+        .door-rail-carrier { stroke: #4c5961; stroke-width: 8; stroke-linecap: square; }
         .dim-text { font: 700 ${n(dimensionLabelFontSize)}px Arial, sans-serif; fill: #163246; stroke: #fff; stroke-width: 4px; paint-order: stroke; }
         .cut-dim-text { font: 700 ${n(cutLabelFontSize)}px Arial, sans-serif; fill: #9a4f12; stroke: #fff; stroke-width: 4px; paint-order: stroke; }
       </style>

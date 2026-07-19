@@ -1,4 +1,4 @@
-import { PANEL_WORKING_WIDTH_MM, type DoorWall } from './calculator'
+import { PANEL_WORKING_WIDTH_MM, type DoorType, type DoorWall, type SlideSide } from './calculator'
 
 const CUT_EPSILON_MM = 1
 
@@ -28,6 +28,8 @@ export interface DoorPlacementParams {
   widthMm: number
   thicknessMm: number
   doorWidthMm: number
+  doorType?: DoorType | string
+  doorSlideSide?: SlideSide | string
   doorWall?: DoorWall | string
   doorOffsetMm?: number
 }
@@ -38,6 +40,12 @@ export interface DoorPlacement extends CenteredDoorSpan {
   availableStartMm: number
   availableEndMm: number
   availableSpanMm: number
+  isSliding: boolean
+  slideSide: SlideSide
+  railStartMm: number
+  railEndMm: number
+  railExtensionStartMm: number
+  railExtensionEndMm: number
   offsetMm: number
   startDistanceMm: number
   endDistanceMm: number
@@ -54,9 +62,14 @@ export interface ChamberPanelRuns {
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max)
 
 const DOOR_WALLS: DoorWall[] = ['front', 'right', 'back', 'left']
+const SLIDE_SIDES: SlideSide[] = ['left', 'right']
 
 export function isDoorWall(value: unknown): value is DoorWall {
   return typeof value === 'string' && DOOR_WALLS.includes(value as DoorWall)
+}
+
+function isSlideSide(value: unknown): value is SlideSide {
+  return typeof value === 'string' && SLIDE_SIDES.includes(value as SlideSide)
 }
 
 /**
@@ -73,14 +86,37 @@ export function normalizeDoorPlacement(params: DoorPlacementParams): DoorPlaceme
   const availableStartMm = safeThicknessMm
   const availableEndMm = Math.max(availableStartMm, wallSpanMm - safeThicknessMm)
   const availableSpanMm = Math.max(0, availableEndMm - availableStartMm)
+  const isSliding = params.doorType === 'sliding'
+  const slideSide = isSlideSide(params.doorSlideSide) ? params.doorSlideSide : 'right'
   const requestedWidthMm = Number.isFinite(params.doorWidthMm) ? Math.max(params.doorWidthMm, 0) : 0
-  const widthMm = Math.min(requestedWidthMm, availableSpanMm)
-  const maxOffsetMm = Math.max(0, (availableSpanMm - widthMm) / 2)
+  const widthMm = Math.min(requestedWidthMm, availableSpanMm / (isSliding ? 2 : 1))
+  // Front and left walls run opposite to the left/right direction seen by a
+  // person standing outside and facing the door.
+  const wallCoordinateIsMirrored = wall === 'front' || wall === 'left'
+  const railExtendsTowardStart =
+    isSliding && (wallCoordinateIsMirrored ? slideSide === 'left' : slideSide === 'right')
+  const startRailClearanceMm = railExtendsTowardStart ? widthMm : 0
+  const endRailClearanceMm = isSliding && !railExtendsTowardStart ? widthMm : 0
+  const minCenterMm = availableStartMm + startRailClearanceMm + widthMm / 2
+  const maxCenterMm = availableEndMm - endRailClearanceMm - widthMm / 2
   const requestedOffsetMm = Number.isFinite(params.doorOffsetMm) ? (params.doorOffsetMm ?? 0) : 0
-  const offsetMm = clamp(requestedOffsetMm, -maxOffsetMm, maxOffsetMm)
-  const centerMm = wallSpanMm / 2 + offsetMm
+  const requestedCenterMm = wallSpanMm / 2 + requestedOffsetMm
+  const centerMm = clamp(requestedCenterMm, minCenterMm, Math.max(minCenterMm, maxCenterMm))
+  const offsetMm = centerMm - wallSpanMm / 2
   const leftMm = centerMm - widthMm / 2
   const rightMm = centerMm + widthMm / 2
+  const railExtensionStartMm = isSliding
+    ? railExtendsTowardStart
+      ? leftMm - widthMm
+      : rightMm
+    : leftMm
+  const railExtensionEndMm = isSliding
+    ? railExtendsTowardStart
+      ? leftMm
+      : rightMm + widthMm
+    : rightMm
+  const railStartMm = Math.min(leftMm, railExtensionStartMm)
+  const railEndMm = Math.max(rightMm, railExtensionEndMm)
 
   return {
     wall,
@@ -88,6 +124,12 @@ export function normalizeDoorPlacement(params: DoorPlacementParams): DoorPlaceme
     availableStartMm,
     availableEndMm,
     availableSpanMm,
+    isSliding,
+    slideSide,
+    railStartMm,
+    railEndMm,
+    railExtensionStartMm,
+    railExtensionEndMm,
     centerMm,
     leftMm,
     rightMm,

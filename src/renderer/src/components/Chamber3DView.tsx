@@ -75,6 +75,8 @@ const CAMERA_FOV_DEG = 26
 const CAMERA_DISTANCE_FACTOR = 1.06
 const PROPOSAL_IMAGE_WIDTH = 1400
 const PROPOSAL_IMAGE_HEIGHT = 760
+const LABEL_BASE_SCALE = 1.4
+const AUTO_CAMERA_ZOOM_FACTOR = 0.9
 const cornerOptions: Array<{ value: DimensionCorner; label: string }> = [
   { value: 'front-left', label: 'Передний левый' },
   { value: 'front-right', label: 'Передний правый' },
@@ -294,7 +296,7 @@ export function Chamber3DSettingsPanel({
           <span>01</span>
           <div>
             <h3>Ракурс камеры</h3>
-            <p>Сначала выберите сторону камеры, затем положение наблюдателя.</p>
+            <p>100% автоматически вмещает в кадр модель, размеры и таблички.</p>
           </div>
         </div>
         <SegmentedSetting<CameraView>
@@ -304,7 +306,7 @@ export function Chamber3DSettingsPanel({
           onChange={(value) => updateViewSetting('cameraView', value)}
         />
         <RangeSetting
-          label="Дальность камеры в КП"
+          label="Поправка к автодальности в КП"
           value={cameraDistancePercent}
           min={5}
           max={180}
@@ -741,9 +743,9 @@ function drawCutDimensionAnnotations(
     Math.min(viewportWidth / PROPOSAL_IMAGE_WIDTH, viewportHeight / PROPOSAL_IMAGE_HEIGHT)
   )
   const baseDimensionLabelScale = matchProposalImageScale
-    ? (22 / 19) * proposalDisplayScale
-    : Math.min(uiScale, 22 / 19)
-  const baseCutLabelScale = matchProposalImageScale ? 1.65 * proposalDisplayScale : uiScale
+    ? (22 / 19) * proposalDisplayScale * LABEL_BASE_SCALE
+    : Math.min(uiScale, 22 / 19) * LABEL_BASE_SCALE
+  const baseCutLabelScale = baseDimensionLabelScale
   const dimensionLabelScale =
     baseDimensionLabelScale * clamp(dimensionLabelSizePercent / 100 || 1, 0.5, 2)
   const cutLabelScale = baseCutLabelScale * clamp(cutLabelSizePercent / 100 || 1, 0.5, 2)
@@ -1350,8 +1352,8 @@ function addDoor(
   const maxDoorHeightM = Math.max(0.2, metrics.wallHeightM - 0.08)
   const doorWidthM = placement.widthMm / 1000
   const doorHeightM = clamp(input.doorHeightMm / 1000, 0.3, maxDoorHeightM)
- const doorCenterX =
-  (placement.offsetMm / 1000) * (placement.wall === 'right' ? 1 : -1)
+  const wallCoordinateToLocalX = placement.wall === 'right' ? 1 : -1
+  const doorCenterX = (placement.offsetMm / 1000) * wallCoordinateToLocalX
   const doorBottomY = 0
   const doorCenterY = doorBottomY + doorHeightM / 2
   const frontSurfaceZ = -0.048
@@ -1360,6 +1362,11 @@ function addDoor(
   const leafWidthM = doorWidthM * 0.93
   const leafHeightM = doorHeightM * 0.95
   const handleRadiusM = clamp(doorWidthM * 0.018, 0.026, 0.04)
+  const railExtensionCenterX =
+    (((placement.railExtensionStartMm + placement.railExtensionEndMm) / 2 - placement.wallSpanMm / 2) /
+      1000) *
+    wallCoordinateToLocalX
+  const slideDirectionX = railExtensionCenterX >= doorCenterX ? 1 : -1
   const addHandle = (x: number): void => {
     const handle = new THREE.Mesh(new THREE.CylinderGeometry(handleRadiusM, handleRadiusM, 0.09, 24), handleMaterial)
     handle.rotation.x = Math.PI / 2
@@ -1398,7 +1405,11 @@ function addDoor(
       frameMaterial
     )
 
-    addHandle(doorCenterX + doorWidthM * 0.34)
+    addHandle(
+      input.doorType === 'sliding'
+        ? doorCenterX - slideDirectionX * doorWidthM * 0.34
+        : doorCenterX + doorWidthM * 0.34
+    )
 
     if (input.doorType === 'single') {
       addBox(
@@ -1457,19 +1468,19 @@ function addDoor(
       doorAssembly.add(bolt)
     }
 
-    const addDetailedRail = (railY: number): void => {
+    const addDetailedRail = (railY: number, railWidthM: number, railCenterX: number): void => {
       // The main body and both lips form a deep U-shaped metal channel.
       addBox(
         doorAssembly,
-        new THREE.Vector3(doorWidthM, railHeightM, railDepthM),
-        new THREE.Vector3(doorCenterX, railY, railZ),
+        new THREE.Vector3(railWidthM, railHeightM, railDepthM),
+        new THREE.Vector3(railCenterX, railY, railZ),
         railMaterial
       )
       for (const lipY of [railY - railHeightM / 2 + railLipHeightM / 2, railY + railHeightM / 2 - railLipHeightM / 2]) {
         addBox(
           doorAssembly,
-          new THREE.Vector3(doorWidthM, railLipHeightM, railLipDepthM),
-          new THREE.Vector3(doorCenterX, lipY, railZ - (railLipDepthM - railDepthM) / 2),
+          new THREE.Vector3(railWidthM, railLipHeightM, railLipDepthM),
+          new THREE.Vector3(railCenterX, lipY, railZ - (railLipDepthM - railDepthM) / 2),
           railAccentMaterial
         )
       }
@@ -1477,13 +1488,13 @@ function addDoor(
       // A recessed face strip, inset end caps and visible fasteners make the profile readable at a distance.
       addBox(
         doorAssembly,
-        new THREE.Vector3(doorWidthM - endCapWidthM * 2, railAccentHeightM, railAccentDepthM),
-        new THREE.Vector3(doorCenterX, railY, railFrontZ),
+        new THREE.Vector3(Math.max(railWidthM - endCapWidthM * 2, endCapWidthM), railAccentHeightM, railAccentDepthM),
+        new THREE.Vector3(railCenterX, railY, railFrontZ),
         railAccentMaterial
       )
       for (const capX of [
-        doorCenterX - doorWidthM / 2 + endCapWidthM / 2,
-        doorCenterX + doorWidthM / 2 - endCapWidthM / 2
+        railCenterX - railWidthM / 2 + endCapWidthM / 2,
+        railCenterX + railWidthM / 2 - endCapWidthM / 2
       ]) {
         addBox(
           doorAssembly,
@@ -1492,14 +1503,35 @@ function addDoor(
           railAccentMaterial
         )
       }
-      for (const boltX of [doorCenterX - doorWidthM * 0.3, doorCenterX + doorWidthM * 0.3]) {
+      for (const boltX of [railCenterX - railWidthM * 0.3, railCenterX + railWidthM * 0.3]) {
         addRailBolt(boltX, railY)
       }
     }
 
-    // Both sliding rails follow the selected door width exactly.
-    for (const railY of [doorBottomY + railHeightM / 2, doorBottomY + doorHeightM + railHeightM / 2]) {
-      addDetailedRail(railY)
+    const topRailWidthM = (placement.railEndMm - placement.railStartMm) / 1000
+    const topRailCenterX =
+      (((placement.railStartMm + placement.railEndMm) / 2 - placement.wallSpanMm / 2) / 1000) *
+      wallCoordinateToLocalX
+
+    // As on the reference door: the upper rail covers the closed doorway and
+    // continues by one door width toward the opening side. The lower guide is
+    // only on that adjacent wall section and is exactly one door width long.
+    addDetailedRail(doorBottomY + doorHeightM + railHeightM / 2, topRailWidthM, topRailCenterX)
+    addDetailedRail(doorBottomY + doorHeightM * 0.18, doorWidthM, railExtensionCenterX)
+
+    const carrierWidthM = clamp(doorWidthM * 0.055, 0.045, 0.075)
+    const carrierHeightM = clamp(doorHeightM * 0.052, 0.09, 0.13)
+    for (const carrierX of [doorCenterX - doorWidthM * 0.32, doorCenterX + doorWidthM * 0.32]) {
+      addBox(
+        doorAssembly,
+        new THREE.Vector3(carrierWidthM, carrierHeightM, railLipDepthM),
+        new THREE.Vector3(
+          carrierX,
+          doorBottomY + doorHeightM - carrierHeightM / 2 + railHeightM * 0.15,
+          railZ - (railLipDepthM - railDepthM) / 2
+        ),
+        railMaterial
+      )
     }
   }
 
@@ -1896,12 +1928,10 @@ function configurePerspectiveCamera(camera: THREE.PerspectiveCamera, viewportWid
   camera.updateProjectionMatrix()
 }
 
-function calculateFramingRadius(
+function collectFramingPoints(
   group: THREE.Object3D,
-  target: THREE.Vector3,
-  cutDimensions: CutDimensionAnchor[],
-  fallbackRadiusM: number
-): number {
+  cutDimensions: CutDimensionAnchor[]
+): THREE.Vector3[] {
   group.updateWorldMatrix(true, true)
   const bounds = new THREE.Box3().setFromObject(group)
   const points: THREE.Vector3[] = []
@@ -1923,6 +1953,14 @@ function calculateFramingRadius(
     }
   }
 
+  return points
+}
+
+function calculateFramingRadius(
+  points: THREE.Vector3[],
+  target: THREE.Vector3,
+  fallbackRadiusM: number
+): number {
   const contentRadiusM = points.reduce(
     (radius, point) => Math.max(radius, point.distanceTo(target)),
     fallbackRadiusM
@@ -1930,17 +1968,7 @@ function calculateFramingRadius(
   return contentRadiusM * 1.04
 }
 
-function placeCamera(
-  camera: THREE.PerspectiveCamera,
-  target: THREE.Vector3,
-  modelRadiusM: number,
-  cameraView: CameraView,
-  distanceFactor = CAMERA_DISTANCE_FACTOR
-): void {
-  const verticalFov = THREE.MathUtils.degToRad(camera.fov)
-  const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect)
-  const limitingHalfFov = Math.min(verticalFov, horizontalFov) / 2
-  const distance = Math.max((modelRadiusM / Math.sin(limitingHalfFov)) * distanceFactor, 0.5)
+function getCameraDirection(cameraView: CameraView): THREE.Vector3 {
   const wall = cameraView.split('-')[0] as 'front' | 'right' | 'back' | 'left'
   const wallNormal =
     wall === 'front'
@@ -1955,9 +1983,59 @@ function placeCamera(
     tangentRight,
     cameraView.endsWith('-left') ? -0.42 : 0.42
   )
-  const direction = new THREE.Vector3(horizontalDirection.x, 0.5, horizontalDirection.z).normalize()
+
+  return new THREE.Vector3(horizontalDirection.x, 0.5, horizontalDirection.z).normalize()
+}
+
+function placeCamera(
+  camera: THREE.PerspectiveCamera,
+  target: THREE.Vector3,
+  framingPoints: THREE.Vector3[],
+  fallbackRadiusM: number,
+  cameraView: CameraView,
+  viewportWidth: number,
+  viewportHeight: number,
+  labelSizePercent: number,
+  distanceFactor = CAMERA_DISTANCE_FACTOR
+): void {
+  const verticalFov = THREE.MathUtils.degToRad(camera.fov)
+  const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect)
+  const direction = getCameraDirection(cameraView)
+
+  camera.position.copy(target).add(direction)
+  camera.lookAt(target)
+  camera.updateMatrixWorld(true)
+
+  const cameraRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize()
+  const cameraUp = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).normalize()
+  const safeLabelScale = clamp(labelSizePercent / 100 || 1, 0.5, 2) * LABEL_BASE_SCALE
+  const horizontalMarginPx = Math.min(viewportWidth * 0.2, 52 + 28 * safeLabelScale)
+  const verticalMarginPx = Math.min(viewportHeight * 0.2, 34 + 18 * safeLabelScale)
+  const usableHorizontalTangent =
+    Math.tan(horizontalFov / 2) * clamp(1 - (2 * horizontalMarginPx) / Math.max(viewportWidth, 1), 0.6, 0.94)
+  const usableVerticalTangent =
+    Math.tan(verticalFov / 2) * clamp(1 - (2 * verticalMarginPx) / Math.max(viewportHeight, 1), 0.6, 0.92)
+  let fittedDistance = 0.5
+
+  for (const point of framingPoints) {
+    const relativePoint = point.clone().sub(target)
+    const depthOffset = relativePoint.dot(direction)
+    fittedDistance = Math.max(
+      fittedDistance,
+      depthOffset + Math.abs(relativePoint.dot(cameraRight)) / usableHorizontalTangent,
+      depthOffset + Math.abs(relativePoint.dot(cameraUp)) / usableVerticalTangent
+    )
+  }
+
+  if (framingPoints.length === 0) {
+    const limitingHalfFov = Math.min(verticalFov, horizontalFov) / 2
+    fittedDistance = Math.max(fittedDistance, fallbackRadiusM / Math.sin(limitingHalfFov))
+  }
+
+  const distance = fittedDistance * distanceFactor * AUTO_CAMERA_ZOOM_FACTOR
   camera.position.copy(target).add(direction.multiplyScalar(distance))
   camera.lookAt(target)
+  camera.updateMatrixWorld(true)
   camera.updateProjectionMatrix()
 }
 
@@ -1976,7 +2054,7 @@ export function renderChamber3DToDataUrl(
   const maxSideM = Math.max(metrics.lengthM, metrics.widthM, metrics.totalHeightM)
   const modelRadiusM = Math.sqrt(metrics.lengthM ** 2 + metrics.widthM ** 2 + metrics.totalHeightM ** 2) / 2
   const target = new THREE.Vector3(0, metrics.totalHeightM * 0.48, 0)
-  const framingRadiusM = calculateFramingRadius(group, target, cutDimensions, modelRadiusM)
+  const framingPoints = collectFramingPoints(group, cutDimensions)
   const cameraDistanceScale = clamp(input.view3d.cameraDistancePercent / 100 || 1, 0.05, 1.8)
   const camera = new THREE.PerspectiveCamera(CAMERA_FOV_DEG, width / height, 0.03, Math.max(80, maxSideM * 12))
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true })
@@ -1988,7 +2066,17 @@ export function renderChamber3DToDataUrl(
   addSceneLights(scene, maxSideM)
   addGround(scene, maxSideM)
   configurePerspectiveCamera(camera, width, height)
-  placeCamera(camera, target, framingRadiusM, input.view3d.cameraView, cameraDistanceFactor * cameraDistanceScale)
+  placeCamera(
+    camera,
+    target,
+    framingPoints,
+    modelRadiusM,
+    input.view3d.cameraView,
+    width,
+    height,
+    Math.max(input.view3d.dimensionLabelSizePercent, input.view3d.cutLabelSizePercent),
+    cameraDistanceFactor * cameraDistanceScale
+  )
   layoutDimensionLabels(scene, camera, width, height)
   renderer.render(scene, camera)
 
@@ -2220,11 +2308,13 @@ export function Chamber3DView({
         ...Object.values(input.view3d),
         input.doorHeightMm,
         input.doorType,
+        input.doorSlideSide,
         input.doorHasThreshold ? 'threshold' : 'nothreshold'
       ].join('-'),
     [
       input.doorHasThreshold,
       input.doorHeightMm,
+      input.doorSlideSide,
       input.doorType,
       input.doorWidthMm,
       input.doorWall,
@@ -2254,7 +2344,8 @@ export function Chamber3DView({
     const maxSideM = Math.max(metrics.lengthM, metrics.widthM, metrics.totalHeightM)
     const modelRadiusM = Math.sqrt(metrics.lengthM ** 2 + metrics.widthM ** 2 + metrics.totalHeightM ** 2) / 2
     const target = new THREE.Vector3(0, metrics.totalHeightM * 0.48, 0)
-    const framingRadiusM = calculateFramingRadius(group, target, cutDimensions, modelRadiusM)
+    const framingPoints = collectFramingPoints(group, cutDimensions)
+    const framingRadiusM = calculateFramingRadius(framingPoints, target, modelRadiusM)
     const cameraDistanceScale = clamp(input.view3d.cameraDistancePercent / 100 || 1, 0.05, 1.8)
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true })
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
@@ -2276,7 +2367,19 @@ export function Chamber3DView({
     controls.target.copy(target)
 
     const resetCamera = (): void => {
-      placeCamera(camera, target, framingRadiusM, input.view3d.cameraView, CAMERA_DISTANCE_FACTOR * cameraDistanceScale)
+      const viewportWidth = renderer.domElement.clientWidth || container.clientWidth || 320
+      const viewportHeight = renderer.domElement.clientHeight || container.clientHeight || 260
+      placeCamera(
+        camera,
+        target,
+        framingPoints,
+        modelRadiusM,
+        input.view3d.cameraView,
+        viewportWidth,
+        viewportHeight,
+        Math.max(input.view3d.dimensionLabelSizePercent, input.view3d.cutLabelSizePercent),
+        CAMERA_DISTANCE_FACTOR * cameraDistanceScale
+      )
       controls.target.copy(target)
       controls.update()
     }
@@ -2357,6 +2460,7 @@ export function Chamber3DView({
   }, [
     input.doorHasThreshold,
     input.doorHeightMm,
+    input.doorSlideSide,
     input.doorType,
     input.doorWidthMm,
     input.doorWall,

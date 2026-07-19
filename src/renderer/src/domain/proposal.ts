@@ -183,7 +183,7 @@ export function buildProposalHtml({
 }: ProposalHtmlInput): string {
   const today = new Date().toLocaleDateString('ru-RU')
   const detailed = proposalMode === 'detailed'
-  const proposalType = detailed ? 'Коммерческое предложение' : 'Краткое коммерческое предложение'
+  const proposalType = 'Коммерческое предложение'
   const validUntil = proposal.validUntil ? new Date(`${proposal.validUntil}T00:00:00`).toLocaleDateString('ru-RU') : ''
   const proposalNote = proposal.note.trim()
 
@@ -217,7 +217,7 @@ export function buildProposalHtml({
       .buyer-card h2 { margin: 0 0 6px; color: #124837; font-size: 17px; }
       .buyer-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px 14px; color: #617083; }
       .buyer-details span { overflow-wrap: anywhere; }
-      .cover-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 14mm; }
+      .cover-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 14mm; }
       .cover-summary div { min-height: 24mm; padding: 6mm 5mm; border: 1px solid #cfd6dd; background: #fff; }
       .cover-summary span { display: block; color: #617083; font-size: 9px; text-transform: uppercase; }
       .cover-summary strong { display: block; margin-top: 7px; color: #124837; font-size: 14px; line-height: 1.2; }
@@ -256,7 +256,7 @@ export function buildProposalHtml({
       .drawing { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: start; margin-top: 8px; break-inside: avoid; }
       .drawing-card, .note { border: 1px solid #cfd6dd; padding: 8px; break-inside: avoid; }
       .drawing-card svg, .drawing-card .rendered { display: block; width: 100%; height: auto; object-fit: contain; }
-      .side-drawing svg, .side-drawing .rendered { max-height: 300px; }
+      .side-drawing svg, .side-drawing .rendered { max-height: none; }
       .door-installation-note { margin: 6px 0 0; color: #617083; font-size: 10px; line-height: 1.3; }
       .equipment-photo { margin: 6px 0 0; }
       .equipment-photo img { display: block; width: 100%; max-height: 130px; object-fit: contain; }
@@ -295,7 +295,6 @@ export function buildProposalHtml({
 
         <section class="cover-summary">
           <div><span>Камер в КП</span><strong>${chambers.length}</strong></div>
-          <div><span>Режим</span><strong>${detailed ? 'Подробное' : 'Краткое'}</strong></div>
           <div><span>НДС</span><strong>${
             proposalResult.vatEnabled ? `${proposalResult.vatRatePercent}%` : 'не облагается'
           }</strong></div>

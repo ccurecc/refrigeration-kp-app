@@ -8,5 +8,9 @@ tmp
 .env
 .env.*
 context.md
+CONTEXT.md
+.claude
+dev_stdout.log
+dev_stderr.log
 venv/
 .venv/

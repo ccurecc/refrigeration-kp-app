@@ -86,6 +86,40 @@ export function DoorPositionEditor({ open, input, onClose, onApply }: DoorPositi
         : wall === 'left'
           ? { x: leftWallRect.x, y: leftWallRect.y + verticalDoorOffsetPx, width: leftWallRect.width, height: verticalDoorPx }
           : { x: rightWallRect.x, y: rightWallRect.y + verticalDoorOffsetPx, width: rightWallRect.width, height: verticalDoorPx }
+  const railExtensionPx = Math.max(placement.railExtensionEndMm - placement.railExtensionStartMm, 0)
+  const railRect = !placement.isSliding
+    ? null
+    : wall === 'front'
+      ? {
+          x: x0 + placement.railExtensionStartMm * scale,
+          y: bottomWallRect.y,
+          width: railExtensionPx * scale,
+          height: bottomWallRect.height
+        }
+      : wall === 'back'
+        ? {
+            x: x0 + placement.railExtensionStartMm * scale,
+            y: topWallRect.y,
+            width: railExtensionPx * scale,
+            height: topWallRect.height
+          }
+        : wall === 'left'
+          ? {
+              x: leftWallRect.x,
+              y:
+                leftWallRect.y +
+                Math.max(placement.railExtensionStartMm - placement.availableStartMm, 0) * verticalDoorScale,
+              width: leftWallRect.width,
+              height: railExtensionPx * verticalDoorScale
+            }
+          : {
+              x: rightWallRect.x,
+              y:
+                rightWallRect.y +
+                Math.max(placement.railExtensionStartMm - placement.availableStartMm, 0) * verticalDoorScale,
+              width: rightWallRect.width,
+              height: railExtensionPx * verticalDoorScale
+            }
 
   const updateFromPointer = (event: ReactPointerEvent<SVGSVGElement>): void => {
     const rect = event.currentTarget.getBoundingClientRect()
@@ -186,6 +220,7 @@ export function DoorPositionEditor({ open, input, onClose, onApply }: DoorPositi
               <rect {...bottomWallRect} className="door-editor-wall" />
               <rect {...leftWallRect} className="door-editor-wall" />
               <rect {...rightWallRect} className="door-editor-wall" />
+              {railRect ? <rect {...railRect} rx="3" className="door-editor-rail" /> : null}
               <rect {...doorRect} rx="3" className="door-editor-door" />
               <g className="door-editor-grip" transform={`translate(${doorRect.x + doorRect.width / 2} ${doorRect.y + doorRect.height / 2})`}>
                 <line x1="-11" y1="0" x2="11" y2="0" />
@@ -193,6 +228,9 @@ export function DoorPositionEditor({ open, input, onClose, onApply }: DoorPositi
               </g>
               <text x={canvas.width / 2} y={482} textAnchor="middle" className="door-editor-help-text">
                 Толщина панелей {formatMm(input.thicknessMm)} · проём {formatMm(placement.widthMm)}
+                {placement.isSliding
+                  ? ` · рельс ${formatMm(placement.widthMm)} ${placement.slideSide === 'left' ? 'слева' : 'справа'}`
+                  : ''}
               </text>
             </svg>
           </div>
@@ -202,6 +240,12 @@ export function DoorPositionEditor({ open, input, onClose, onApply }: DoorPositi
             <div><span>До начала проёма</span><strong>{formatMm(placement.startDistanceMm)}</strong></div>
             <div><span>После проёма</span><strong>{formatMm(placement.endDistanceMm)}</strong></div>
             <div><span>Смещение от центра</span><strong>{formatMm(Math.abs(placement.offsetMm))}</strong></div>
+            {placement.isSliding ? (
+              <>
+                <div><span>До начала двери с рельсом</span><strong>{formatMm(placement.railStartMm)}</strong></div>
+                <div><span>После двери с рельсом</span><strong>{formatMm(placement.wallSpanMm - placement.railEndMm)}</strong></div>
+              </>
+            ) : null}
           </div>
         </div>
 
@@ -209,7 +253,7 @@ export function DoorPositionEditor({ open, input, onClose, onApply }: DoorPositi
           <button className="ghost-button" type="button" onClick={() => setOffsetMm(0)}>
             <RotateCcw size={15} /> Вернуть в центр
           </button>
-          <span className="door-editor-drag-note"><MoveHorizontal size={16} /> Дверь не выйдет за границы стены</span>
+          <span className="door-editor-drag-note"><MoveHorizontal size={16} /> Дверь и рельсы не выйдут за границы стены</span>
           <button className="ghost-button" type="button" onClick={onClose}>Отмена</button>
           <button className="primary-button" type="button" onClick={() => onApply(placement.wall, placement.offsetMm)}>Применить</button>
         </footer>
