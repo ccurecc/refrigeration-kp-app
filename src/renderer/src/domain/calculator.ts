@@ -320,6 +320,47 @@ export function getEquipmentOnlyTitle(input: EquipmentOnlyItem): string {
   return input.name.trim() || 'Холодильное оборудование'
 }
 
+function equipmentMountingRowName(title: string): string {
+  return `Монтаж и расходники (${title})`
+}
+
+function buildEquipmentRows(
+  idPrefix: string,
+  title: string,
+  quantity: number,
+  equipmentPrice: number,
+  mountingPrice: number,
+  imageName: string
+): MaterialRow[] {
+  const rows: MaterialRow[] = [
+    {
+      id: `${idPrefix}-equipment`,
+      name: title,
+      unit: 'компл.',
+      amountPerChamber: 1,
+      amountTotal: quantity,
+      unitPrice: money(equipmentPrice),
+      sum: money(equipmentPrice * quantity),
+      note: imageName ? `Фото: ${imageName}` : 'Холодильное оборудование'
+    }
+  ]
+
+  if (mountingPrice > 0) {
+    rows.push({
+      id: `${idPrefix}-equipment-mounting`,
+      name: equipmentMountingRowName(title),
+      unit: 'компл.',
+      amountPerChamber: 1,
+      amountTotal: quantity,
+      unitPrice: money(mountingPrice),
+      sum: money(mountingPrice * quantity),
+      note: 'Отдельно от стоимости оборудования'
+    })
+  }
+
+  return rows
+}
+
 export function calculateChamber(input: ChamberInput, pricing: CalculationPricing = defaultPricing): ChamberResult {
   const quantity = Math.max(1, Math.round(input.quantity))
   const thicknessMm = input.thicknessMm
@@ -632,21 +673,20 @@ export function calculateChamber(input: ChamberInput, pricing: CalculationPricin
   })
 
   if (input.equipmentEnabled) {
-    materialRows.push({
-      id: 'equipment',
-      name: input.equipmentName || 'Холодильное оборудование',
-      unit: 'компл.',
-      amountPerChamber: 1,
-      amountTotal: quantity,
-      unitPrice: money(input.equipmentPrice + input.equipmentMountingPrice),
-      sum: money((input.equipmentPrice + input.equipmentMountingPrice) * quantity),
-      note: 'Оборудование с монтажом и расходниками'
-    })
+    materialRows.push(
+      ...buildEquipmentRows(
+        'chamber',
+        input.equipmentName || 'Холодильное оборудование',
+        quantity,
+        input.equipmentPrice,
+        input.equipmentMountingPrice,
+        input.equipmentImageName
+      )
+    )
   }
 
   const chamberLineSum = money(panelCost + accessoryCost + chamberMountingCost)
   const doorLineSum = money(doorCost + doorMountingCost)
-  const equipmentLineSum = money(equipmentCost + equipmentMountingCost)
 
   const compactRows: MaterialRow[] = [
     {
@@ -672,16 +712,16 @@ export function calculateChamber(input: ChamberInput, pricing: CalculationPricin
   ]
 
   if (input.equipmentEnabled) {
-    compactRows.push({
-      id: 'compact-equipment',
-      name: input.equipmentName || 'Холодильное оборудование',
-      unit: 'компл.',
-      amountPerChamber: 1,
-      amountTotal: quantity,
-      unitPrice: money(equipmentLineSum / quantity),
-      sum: equipmentLineSum,
-      note: input.equipmentImageName ? `Фото: ${input.equipmentImageName}` : 'Оборудование с монтажом и расходниками'
-    })
+    compactRows.push(
+      ...buildEquipmentRows(
+        'compact',
+        input.equipmentName || 'Холодильное оборудование',
+        quantity,
+        input.equipmentPrice,
+        input.equipmentMountingPrice,
+        input.equipmentImageName
+      )
+    )
   }
 
   return {
@@ -726,20 +766,8 @@ export function calculateChamber(input: ChamberInput, pricing: CalculationPricin
 export function calculateEquipmentOnlyItem(input: EquipmentOnlyItem): ProposalEquipmentItem {
   const quantity = Math.max(1, Math.round(input.quantity))
   const title = getEquipmentOnlyTitle(input)
-  const unitPrice = money(input.price + input.mountingPrice)
-  const subtotal = money(unitPrice * quantity)
-  const rows: MaterialRow[] = [
-    {
-      id: `equipment-${input.id}`,
-      name: title,
-      unit: 'компл.',
-      amountPerChamber: 1,
-      amountTotal: quantity,
-      unitPrice,
-      sum: subtotal,
-      note: input.imageName ? `Фото: ${input.imageName}` : 'Оборудование с монтажом и расходниками'
-    }
-  ]
+  const subtotal = money((input.price + input.mountingPrice) * quantity)
+  const rows = buildEquipmentRows(`equipment-${input.id}`, title, quantity, input.price, input.mountingPrice, input.imageName)
 
   return {
     input,

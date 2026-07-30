@@ -256,7 +256,7 @@ function equipmentOnlyBlock(item: ProposalPdfEquipmentItem, index: number, total
           <h3>Холодильное оборудование</h3>
           <p class="equipment-model">Модель: ${escapeHtml(equipmentTitle)}</p>
           <p>Количество: ${quantity} шт.</p>
-          <p>${item.input.mountingPrice > 0 ? 'Монтаж и расходники выделены отдельной суммой.' : 'Монтаж включён в позицию без отдельной строки.'}</p>
+          <p>${item.input.mountingPrice > 0 ? 'Монтаж и расходники выделены отдельной строкой.' : 'Монтаж включён в позицию без отдельной строки.'}</p>
           ${equipmentImage || '<p>Фото оборудования не добавлено.</p>'}
         </div>
       </div>
