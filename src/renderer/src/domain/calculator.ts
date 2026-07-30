@@ -5,6 +5,7 @@ export const PROFILE_UNIT_LENGTH_M = 2
 export type PanelThickness = 50 | 60 | 80 | 100 | 120
 export type PanelFilling = 'PIR' | 'PUR' | 'PPS' | 'custom'
 export type ProposalMode = 'detailed' | 'compact'
+export type ProposalSubject = 'chambers' | 'equipment-only'
 export type DoorType = 'single' | 'double' | 'sliding'
 export type SlideSide = 'left' | 'right'
 export type DoorWall = 'front' | 'right' | 'back' | 'left'
@@ -104,14 +105,26 @@ export interface ChamberInput {
   equipmentPrice: number
   equipmentMountingPrice: number
   equipmentImageName: string
+  equipmentImageSizePercent: number
   panelPricePerM2: number
   mountingWallPricePerM2: number
   mountingFloorPricePerM2: number
   mountingCeilingPricePerM2: number
 }
 
+export interface EquipmentOnlyItem {
+  id: string
+  name: string
+  quantity: number
+  price: number
+  mountingPrice: number
+  imageName: string
+  imageSizePercent: number
+}
+
 /** КП-level options shared across all chambers. */
 export interface ProposalOptions {
+  proposalSubject: ProposalSubject
   proposalMode: ProposalMode
   vatEnabled: boolean
   vatRatePercent: number
@@ -133,7 +146,7 @@ export interface CostRow {
   id: string
   name: string
   amount: number
-  kind?: 'chamber' | 'extra' | 'subtotal' | 'vat' | 'total'
+  kind?: 'chamber' | 'equipment' | 'extra' | 'subtotal' | 'vat' | 'total'
 }
 
 export interface PanelGroup {
@@ -212,11 +225,20 @@ export interface ProposalChamber {
   result: ChamberResult
 }
 
+export interface ProposalEquipmentItem {
+  input: EquipmentOnlyItem
+  title: string
+  rows: MaterialRow[]
+  subtotal: number
+}
+
 export interface ProposalResult {
   chambers: ProposalChamber[]
+  equipmentItems: ProposalEquipmentItem[]
   summaryRows: CostRow[]
   costRows: CostRow[]
   chambersSubtotal: number
+  equipmentSubtotal: number
   extraRows: EstimateExtraRow[]
   extraRowsTotal: number
   subtotal: number
@@ -292,6 +314,10 @@ export function getChamberTitle(input: ChamberInput): string {
   const longSideMm = Math.max(input.lengthMm, input.widthMm)
   const shortSideMm = Math.min(input.lengthMm, input.widthMm)
   return input.title.trim() || `Камера ${longSideMm}×${shortSideMm}×${input.heightMm}`
+}
+
+export function getEquipmentOnlyTitle(input: EquipmentOnlyItem): string {
+  return input.name.trim() || 'Холодильное оборудование'
 }
 
 export function calculateChamber(input: ChamberInput, pricing: CalculationPricing = defaultPricing): ChamberResult {
@@ -697,12 +723,98 @@ export function calculateChamber(input: ChamberInput, pricing: CalculationPricin
   }
 }
 
+export function calculateEquipmentOnlyItem(input: EquipmentOnlyItem): ProposalEquipmentItem {
+  const quantity = Math.max(1, Math.round(input.quantity))
+  const title = getEquipmentOnlyTitle(input)
+  const unitPrice = money(input.price + input.mountingPrice)
+  const subtotal = money(unitPrice * quantity)
+  const rows: MaterialRow[] = [
+    {
+      id: `equipment-${input.id}`,
+      name: title,
+      unit: 'компл.',
+      amountPerChamber: 1,
+      amountTotal: quantity,
+      unitPrice,
+      sum: subtotal,
+      note: input.imageName ? `Фото: ${input.imageName}` : 'Оборудование с монтажом и расходниками'
+    }
+  ]
+
+  return {
+    input,
+    title,
+    rows,
+    subtotal
+  }
+}
+
 /** Calculate a whole КП made of one or more chambers + shared options. */
 export function calculateProposal(
   chambers: ChamberInput[],
   pricing: CalculationPricing = defaultPricing,
-  options: ProposalOptions
+  options: ProposalOptions,
+  equipmentOnlyItems: EquipmentOnlyItem[] = []
 ): ProposalResult {
+  const proposalSubject = options.proposalSubject ?? 'chambers'
+  const extraRows = (options.extraEstimateRows ?? []).filter((row) => row.name.trim() || row.amount)
+  const extraRowsTotal = money(extraRows.reduce((acc, row) => acc + row.amount, 0))
+
+  if (proposalSubject === 'equipment-only') {
+    const computedEquipment = equipmentOnlyItems.map(calculateEquipmentOnlyItem)
+    const summaryRows: CostRow[] = computedEquipment.map((item, index) => {
+      const quantity = Math.max(1, Math.round(item.input.quantity))
+      const qtyLabel = quantity > 1 ? ` · ${quantity} шт` : ''
+      return {
+        id: `equipment-${item.input.id}`,
+        name: `${index + 1}. ${item.title}${qtyLabel}`,
+        amount: item.subtotal,
+        kind: 'equipment'
+      }
+    })
+    const equipmentSubtotal = money(computedEquipment.reduce((acc, item) => acc + item.subtotal, 0))
+    const subtotal = money(equipmentSubtotal + extraRowsTotal)
+    const vatAmount = options.vatEnabled ? money((subtotal * options.vatRatePercent) / 100) : 0
+    const total = money(subtotal + vatAmount)
+    const costRows: CostRow[] = [...summaryRows]
+
+    for (const row of extraRows) {
+      costRows.push({
+        id: `extra-${row.id}`,
+        name: row.name.trim() || 'Дополнительная позиция',
+        amount: money(row.amount),
+        kind: 'extra'
+      })
+    }
+
+    if (options.vatEnabled) {
+      costRows.push(
+        { id: 'subtotal', name: 'Итого без НДС', amount: subtotal, kind: 'subtotal' },
+        { id: 'vat', name: `НДС ${options.vatRatePercent}%`, amount: vatAmount, kind: 'vat' }
+      )
+    } else {
+      costRows.push({ id: 'vat', name: 'НДС не облагается', amount: 0, kind: 'vat' })
+    }
+
+    costRows.push({ id: 'total', name: 'Итого к оплате', amount: total, kind: 'total' })
+
+    return {
+      chambers: [],
+      equipmentItems: computedEquipment,
+      summaryRows,
+      costRows,
+      chambersSubtotal: 0,
+      equipmentSubtotal,
+      extraRows,
+      extraRowsTotal,
+      subtotal,
+      vatEnabled: options.vatEnabled,
+      vatRatePercent: options.vatRatePercent,
+      vatAmount,
+      total
+    }
+  }
+
   const computed: ProposalChamber[] = chambers.map((input) => ({
     input,
     title: getChamberTitle(input),
@@ -721,9 +833,6 @@ export function calculateProposal(
   })
 
   const chambersSubtotal = money(computed.reduce((acc, chamber) => acc + chamber.result.chamberSubtotal, 0))
-
-  const extraRows = (options.extraEstimateRows ?? []).filter((row) => row.name.trim() || row.amount)
-  const extraRowsTotal = money(extraRows.reduce((acc, row) => acc + row.amount, 0))
 
   const subtotal = money(chambersSubtotal + extraRowsTotal)
   const vatAmount = options.vatEnabled ? money((subtotal * options.vatRatePercent) / 100) : 0
@@ -748,9 +857,11 @@ export function calculateProposal(
 
   return {
     chambers: computed,
+    equipmentItems: [],
     summaryRows,
     costRows,
     chambersSubtotal,
+    equipmentSubtotal: 0,
     extraRows,
     extraRowsTotal,
     subtotal,
@@ -762,6 +873,7 @@ export function calculateProposal(
 }
 
 let chamberSeq = 0
+let equipmentSeq = 0
 export function createChamber(partial: Partial<ChamberInput> = {}): ChamberInput {
   chamberSeq += 1
   const id =
@@ -771,6 +883,17 @@ export function createChamber(partial: Partial<ChamberInput> = {}): ChamberInput
     ...partial,
     id,
     view3d: { ...defaultChamber3DSettings, ...partial.view3d }
+  }
+}
+
+export function createEquipmentOnlyItem(partial: Partial<EquipmentOnlyItem> = {}): EquipmentOnlyItem {
+  equipmentSeq += 1
+  const id =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `equipment-${Date.now()}-${equipmentSeq}`
+  return {
+    ...defaultEquipmentOnlyItem,
+    ...partial,
+    id
   }
 }
 
@@ -801,13 +924,25 @@ export const defaultChamberInput: ChamberInput = {
   equipmentPrice: 0,
   equipmentMountingPrice: 0,
   equipmentImageName: '',
+  equipmentImageSizePercent: 100,
   panelPricePerM2: 2768.48,
   mountingWallPricePerM2: 0,
   mountingFloorPricePerM2: 0,
   mountingCeilingPricePerM2: 0
 }
 
+export const defaultEquipmentOnlyItem: EquipmentOnlyItem = {
+  id: 'equipment-1',
+  name: '',
+  quantity: 1,
+  price: 0,
+  mountingPrice: 0,
+  imageName: '',
+  imageSizePercent: 100
+}
+
 export const defaultProposalOptions: ProposalOptions = {
+  proposalSubject: 'chambers',
   proposalMode: 'detailed',
   vatEnabled: true,
   vatRatePercent: 22,
