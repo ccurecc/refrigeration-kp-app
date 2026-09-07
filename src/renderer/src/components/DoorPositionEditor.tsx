@@ -201,7 +201,7 @@ export function DoorPositionEditor({ open, input, onClose, onApply }: DoorPositi
               className={`door-editor-canvas${dragging ? ' dragging' : ''}`}
               viewBox={`0 0 ${canvas.width} ${canvas.height}`}
               role="img"
-              aria-label={`План камеры. Дверь на стене: ${WALL_LABELS[wall].toLowerCase()}`}
+              aria-label={`План холодильной камеры. Дверь на стене: ${WALL_LABELS[wall].toLowerCase()}`}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={finishDrag}

@@ -60,7 +60,7 @@ const numberFormatter = new Intl.NumberFormat('ru-RU', {
   maximumFractionDigits: 2
 })
 
-export const DOOR_INSTALLATION_NOTE = 'Примечание: дверь при монтаже может быть установлена в любом месте камеры.'
+export const DOOR_INSTALLATION_NOTE = 'Примечание: дверь при монтаже может быть установлена в любом месте холодильной камеры.'
 const EQUIPMENT_PHOTO_BASE_HEIGHT_PX = 130
 const EQUIPMENT_PHOTO_MIN_SIZE_PERCENT = 50
 const EQUIPMENT_PHOTO_MAX_SIZE_PERCENT = 500
@@ -146,22 +146,40 @@ function buildEquipmentImage(imageDataUrl: string | undefined, imageSizePercent:
   )}" alt="Фото оборудования" /></figure>`
 }
 
+function buildEquipmentCharacteristics(characteristics: string | undefined): string {
+  const text = characteristics?.trim()
+
+  if (!text) {
+    return ''
+  }
+
+  return `
+    <section class="equipment-characteristics">
+      <h4>Характеристики холодильного оборудования</h4>
+      <p>${escapeHtml(text)}</p>
+    </section>
+  `
+}
+
 function chamberBlock(chamber: ProposalPdfChamber, index: number, total: number, detailed: boolean): string {
   const { input, result } = chamber
   const quantity = Math.max(1, Math.round(input.quantity))
   const quantityLabel = quantity > 1 ? ` · ${quantity} шт` : ''
 
   const side3d = chamber.side3dImageDataUrl
-    ? `<img class="rendered" src="${escapeHtml(chamber.side3dImageDataUrl)}" alt="3D-вид камеры с размерами" />`
+    ? `<img class="rendered" src="${escapeHtml(chamber.side3dImageDataUrl)}" alt="3D-вид холодильной камеры с размерами" />`
     : buildSide3dSvg(input, result)
   const equipmentImage = input.equipmentEnabled
     ? buildEquipmentImage(chamber.equipmentImageDataUrl, input.equipmentImageSizePercent)
     : ''
-  const noteContent = equipmentImage
+  const equipmentCharacteristics = input.equipmentEnabled ? buildEquipmentCharacteristics(input.equipmentCharacteristics) : ''
+  const hasEquipmentDetails = Boolean(equipmentImage || equipmentCharacteristics)
+  const noteContent = hasEquipmentDetails
     ? `
           <h3>Холодильное оборудование</h3>
           <p class="equipment-model">Модель: ${escapeHtml(input.equipmentName || 'не указана')}</p>
-          ${equipmentImage}
+          ${equipmentImage || '<p>Фото оборудования не добавлено.</p>'}
+          ${equipmentCharacteristics}
         `
     : `
           <h3>Состав</h3>
@@ -173,7 +191,7 @@ function chamberBlock(chamber: ProposalPdfChamber, index: number, total: number,
     <section class="pdf-page chamber-page">
       <header class="chamber-page-head">
         <div>
-          <span class="page-kicker">Камера ${index + 1} из ${total}</span>
+          <span class="page-kicker">Холодильная камера ${index + 1} из ${total}</span>
           <h2 class="chamber-title">${escapeHtml(chamber.title)}${quantityLabel}</h2>
         </div>
         <div class="chamber-page-spec">
@@ -186,7 +204,7 @@ function chamberBlock(chamber: ProposalPdfChamber, index: number, total: number,
           <tr>
             <th>Номенклатура</th>
             <th>Ед.</th>
-            <th>На камеру</th>
+            <th>На холодильную камеру</th>
             <th>Всего</th>
             <th>Цена</th>
             <th>Сумма</th>
@@ -195,7 +213,7 @@ function chamberBlock(chamber: ProposalPdfChamber, index: number, total: number,
         <tbody>${rowsHtml(chamber.rows)}</tbody>
         <tfoot>
           <tr class="chamber-subtotal">
-            <td colspan="5">Итого по камере${detailed ? '' : ' (без НДС)'}</td>
+            <td colspan="5">Итого по холодильной камере${detailed ? '' : ' (без НДС)'}</td>
             <td class="cell-money">${rubFormatter.format(result.chamberSubtotal)}</td>
           </tr>
         </tfoot>
@@ -218,6 +236,7 @@ function equipmentOnlyBlock(item: ProposalPdfEquipmentItem, index: number, total
   const quantity = Math.max(1, Math.round(item.input.quantity))
   const quantityLabel = quantity > 1 ? ` · ${quantity} шт` : ''
   const equipmentImage = buildEquipmentImage(item.equipmentImageDataUrl, item.input.imageSizePercent)
+  const equipmentCharacteristics = buildEquipmentCharacteristics(item.input.characteristics)
   const equipmentTitle = getEquipmentOnlyTitle(item.input)
 
   return `
@@ -258,6 +277,7 @@ function equipmentOnlyBlock(item: ProposalPdfEquipmentItem, index: number, total
           <p>Количество: ${quantity} шт.</p>
           <p>${item.input.mountingPrice > 0 ? 'Монтаж и расходники выделены отдельной строкой.' : 'Монтаж включён в позицию без отдельной строки.'}</p>
           ${equipmentImage || '<p>Фото оборудования не добавлено.</p>'}
+          ${equipmentCharacteristics}
         </div>
       </div>
     </section>
@@ -282,10 +302,10 @@ export function buildProposalHtml({
   const validUntil = proposal.validUntil ? new Date(`${proposal.validUntil}T00:00:00`).toLocaleDateString('ru-RU') : ''
   const proposalNote = proposal.note.trim()
   const coverSubjectLabel = isEquipmentOnlyProposal ? 'Холодильное оборудование' : 'Холодильные камеры'
-  const coverCountLabel = isEquipmentOnlyProposal ? 'Позиций в КП' : 'Камер в КП'
+  const coverCountLabel = isEquipmentOnlyProposal ? 'Позиций в КП' : 'Холодильных камер в КП'
   const coverCountValue = isEquipmentOnlyProposal ? equipmentOnlyItems.length : chambers.length
-  const finalTitle = isEquipmentOnlyProposal ? 'Сводная смета по оборудованию' : 'Сводная смета по камерам'
-  const finalCountLabel = isEquipmentOnlyProposal ? 'Количество позиций' : 'Количество камер'
+  const finalTitle = 'Сводная смета'
+  const finalCountLabel = isEquipmentOnlyProposal ? 'Количество позиций' : 'Количество холодильных камер'
   const footerText = isEquipmentOnlyProposal
     ? 'Все цены и состав работ действительны на дату формирования КП.'
     : 'Расчет двери не уменьшает площадь стеновых панелей: проем вырезается в готовой стене. Все цены и состав работ действительны на дату формирования КП.'
@@ -366,6 +386,9 @@ export function buildProposalHtml({
       .equipment-model { margin: 0 0 6px; color: #124837; font-size: 11px; font-weight: 700; overflow-wrap: anywhere; }
       .equipment-photo { margin: 6px 0 0; }
       .equipment-photo img { display: block; width: 100%; max-height: var(--equipment-photo-max-height, 130px); object-fit: contain; }
+      .equipment-characteristics { margin-top: 8px; padding-top: 7px; border-top: 1px solid #dfe5e2; }
+      .equipment-characteristics h4 { margin: 0 0 5px; color: #124837; font-size: 13px; line-height: 1.25; }
+      .equipment-characteristics p { margin: 0; color: #1d2b26; font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
       .footer { margin-top: auto; padding-top: 8mm; color: #617083; font-size: 9px; break-inside: avoid; }
     </style>
   </head>
@@ -467,7 +490,7 @@ function visualChamberBlock(
   const quantityLabel = quantity > 1 ? ` · ${quantity} шт` : ''
   const title = total > 1 ? `${index + 1}. ${chamber.title}${quantityLabel}` : `${chamber.title}${quantityLabel}`
   const side3d = chamber.side3dImageDataUrl
-    ? `<img class="visual-3d" src="${escapeHtml(chamber.side3dImageDataUrl)}" alt="3D-вид камеры" />`
+    ? `<img class="visual-3d" src="${escapeHtml(chamber.side3dImageDataUrl)}" alt="3D-вид холодильной камеры" />`
     : buildSide3dSvg(chamber.input, chamber.result)
 
   return `
@@ -499,7 +522,7 @@ function visualChamberBlock(
 
 export function buildVisualsPdfHtml({ chambers, company, customer, proposal }: VisualsPdfInput): string {
   const today = new Date().toLocaleDateString('ru-RU')
-  const title = proposal.number.trim() ? `Визуализации ${escapeHtml(proposal.number.trim())}` : 'Визуализации камер'
+  const title = proposal.number.trim() ? `Визуализации ${escapeHtml(proposal.number.trim())}` : 'Визуализации холодильных камер'
   const companyName = company.legalName || 'Компания'
   const buyerLabel = customer.name.trim() ? `Покупатель: ${escapeHtml(customer.name.trim())}` : 'Покупатель не указан'
   const blocks = chambers

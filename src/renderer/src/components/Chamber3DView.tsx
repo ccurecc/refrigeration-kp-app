@@ -84,14 +84,14 @@ const cornerOptions: Array<{ value: DimensionCorner; label: string }> = [
   { value: 'back-right', label: 'Задний правый' }
 ]
 const cameraViewOptions: Array<{ value: CameraView; label: string }> = [
-  { value: 'front-left', label: 'Передняя · камера левее' },
-  { value: 'front-right', label: 'Передняя · камера правее' },
-  { value: 'right-left', label: 'Правая · камера левее' },
-  { value: 'right-right', label: 'Правая · камера правее' },
-  { value: 'back-left', label: 'Задняя · камера левее' },
-  { value: 'back-right', label: 'Задняя · камера правее' },
-  { value: 'left-left', label: 'Левая · камера левее' },
-  { value: 'left-right', label: 'Левая · камера правее' }
+  { value: 'front-left', label: 'Передняя · холодильная камера левее' },
+  { value: 'front-right', label: 'Передняя · холодильная камера правее' },
+  { value: 'right-left', label: 'Правая · холодильная камера левее' },
+  { value: 'right-right', label: 'Правая · холодильная камера правее' },
+  { value: 'back-left', label: 'Задняя · холодильная камера левее' },
+  { value: 'back-right', label: 'Задняя · холодильная камера правее' },
+  { value: 'left-left', label: 'Левая · холодильная камера левее' },
+  { value: 'left-right', label: 'Левая · холодильная камера правее' }
 ]
 const frontSideOptions: Array<{ value: FrontDimensionSide; label: string }> = [
   { value: 'front', label: 'Спереди' },
@@ -295,12 +295,12 @@ export function Chamber3DSettingsPanel({
         <div className="chamber-3d-settings-group-heading">
           <span>01</span>
           <div>
-            <h3>Ракурс камеры</h3>
+            <h3>Ракурс холодильной камеры</h3>
             <p>100% автоматически вмещает в кадр модель, размеры и таблички.</p>
           </div>
         </div>
         <SegmentedSetting<CameraView>
-          label="Сторона и положение камеры"
+          label="Сторона и положение холодильной камеры"
           value={input.view3d.cameraView}
           options={cameraViewOptions}
           onChange={(value) => updateViewSetting('cameraView', value)}
@@ -319,39 +319,39 @@ export function Chamber3DSettingsPanel({
         <div className="chamber-3d-settings-group-heading">
           <span>02</span>
           <div>
-            <h3>Габариты камеры</h3>
+            <h3>Габариты холодильной камеры</h3>
             <p>Расположите основные размеры вокруг модели.</p>
           </div>
         </div>
         <div className="chamber-3d-settings-group-controls">
           <SegmentedSetting<FrontDimensionSide>
-            label="Длина камеры"
+            label="Длина холодильной камеры"
             valueLabel={formatSettingMm(viewFrontMm)}
             value={input.view3d.frontDimensionSide}
             options={frontSideOptions}
             onChange={(value) => updateViewSetting('frontDimensionSide', value)}
             visible={input.view3d.frontDimensionVisible}
-            visibilityAriaLabel="Показывать длину камеры"
+            visibilityAriaLabel="Показывать длину холодильной камеры"
             onVisibilityChange={(visible) => updateViewSetting('frontDimensionVisible', visible)}
           />
           <SegmentedSetting<DepthDimensionSide>
-            label="Ширина камеры"
+            label="Ширина холодильной камеры"
             valueLabel={formatSettingMm(viewDepthMm)}
             value={input.view3d.depthDimensionSide}
             options={depthSideOptions}
             onChange={(value) => updateViewSetting('depthDimensionSide', value)}
             visible={input.view3d.depthDimensionVisible}
-            visibilityAriaLabel="Показывать ширину камеры"
+            visibilityAriaLabel="Показывать ширину холодильной камеры"
             onVisibilityChange={(visible) => updateViewSetting('depthDimensionVisible', visible)}
           />
           <SegmentedSetting<DimensionCorner>
-            label="Высота камеры"
+            label="Высота холодильной камеры"
             valueLabel={formatSettingMm(input.heightMm)}
             value={input.view3d.heightDimensionCorner}
             options={cornerOptions}
             onChange={(value) => updateViewSetting('heightDimensionCorner', value)}
             visible={input.view3d.heightDimensionVisible}
-            visibilityAriaLabel="Показывать высоту камеры"
+            visibilityAriaLabel="Показывать высоту холодильной камеры"
             onVisibilityChange={(visible) => updateViewSetting('heightDimensionVisible', visible)}
           />
           {floorCutMm !== null ? (
@@ -414,7 +414,7 @@ export function Chamber3DSettingsPanel({
           <span>03</span>
           <div>
             <h3>Размеры двери</h3>
-            <p>Настройте подписи проёма отдельно от габаритов камеры.</p>
+            <p>Настройте подписи проёма отдельно от габаритов холодильной камеры.</p>
           </div>
         </div>
         <div className="chamber-3d-settings-group-controls">
@@ -2501,7 +2501,7 @@ export function Chamber3DView({
         className="chamber-3d-view"
         data-geometry-key={geometryKey}
         role="img"
-        aria-label={`3D-вид камеры ${input.lengthMm}x${input.widthMm}x${input.heightMm} мм, дверь: ${input.doorType}, стена: ${input.doorWall}`}
+        aria-label={`3D-вид холодильной камеры ${input.lengthMm}x${input.widthMm}x${input.heightMm} мм, дверь: ${input.doorType}, стена: ${input.doorWall}`}
       />
       {showSettingsControl && onSettingsToggle ? (
         <div className="dimension-corner-control">

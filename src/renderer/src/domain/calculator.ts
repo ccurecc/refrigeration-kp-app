@@ -1,3 +1,5 @@
+import { optimizeWallPanels, type WallPanelOptimization } from './panelOptimizer'
+
 export const PANEL_WORKING_WIDTH_MM = 1190
 export const PANEL_NOMINAL_WIDTH_MM = 1200
 export const PROFILE_UNIT_LENGTH_M = 2
@@ -85,6 +87,12 @@ export interface ChamberInput {
   widthMm: number
   heightMm: number
   quantity: number
+  /** Optional manual quantities per one chamber. Null means automatic. */
+  manualWallPanelCount: number | null
+  manualCeilingPanelCount: number | null
+  manualFloorPanelCount: number | null
+  /** Technological width consumed by each cut, in millimetres. */
+  panelCutKerfMm: number
   thicknessMm: PanelThickness
   panelFilling: PanelFilling
   customPanelFilling: string
@@ -106,6 +114,7 @@ export interface ChamberInput {
   equipmentMountingPrice: number
   equipmentImageName: string
   equipmentImageSizePercent: number
+  equipmentCharacteristics: string
   panelPricePerM2: number
   mountingWallPricePerM2: number
   mountingFloorPricePerM2: number
@@ -120,6 +129,7 @@ export interface EquipmentOnlyItem {
   mountingPrice: number
   imageName: string
   imageSizePercent: number
+  characteristics: string
 }
 
 /** КП-level options shared across all chambers. */
@@ -157,6 +167,11 @@ export interface PanelGroup {
   panelLengthMm: number
   countPerChamber: number
   countTotal: number
+  automaticCountPerChamber: number
+  manualCountPerChamber: number | null
+  isManualOverride: boolean
+  cutPanelCount: number
+  cutPlan: string[]
   areaPerChamberM2: number
   areaTotalM2: number
 }
@@ -187,6 +202,7 @@ export interface ChamberResult {
   panelAreaExactM2: number
   panelAreaSoldM2: number
   panelGroups: PanelGroup[]
+  wallPanelOptimization: WallPanelOptimization
   wallPanelCount: number
   ceilingPanelCount: number
   floorPanelCount: number
@@ -256,6 +272,14 @@ const ceilToUnit = (meters: number): number => Math.max(0, Math.ceil(round2(mete
 const money = (value: number): number => Math.round(value * 100) / 100
 const panelsAcross = (spanMm: number): number => Math.max(1, Math.ceil(Math.max(spanMm, 1) / PANEL_WORKING_WIDTH_MM))
 const workingWidthM = PANEL_WORKING_WIDTH_MM / 1000
+const normalizeManualPanelCount = (value: number | null | undefined): number | null => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 1) {
+    return null
+  }
+  return Math.max(1, Math.round(value))
+}
+const resolvePanelCount = (automaticCount: number, manualCount: number | null | undefined): number =>
+  normalizeManualPanelCount(manualCount) ?? automaticCount
 
 const defaultPricing: CalculationPricing = {
   internalAnglePricePerM: 0,
@@ -283,12 +307,16 @@ export function getPanelFillingLabel(input: Pick<ChamberInput, 'panelFilling' | 
 }
 
 export function getDoorDescription(
-  input: Pick<ChamberInput, 'doorName' | 'doorWidthMm' | 'doorHeightMm' | 'doorHasThreshold' | 'doorType'>
+  input: Pick<
+    ChamberInput,
+    'doorName' | 'doorWidthMm' | 'doorHeightMm' | 'doorHasThreshold' | 'doorType' | 'doorMountingPrice'
+  >
 ): string {
   const doorName = input.doorName.trim() || 'Дверь'
   const doorSize = `${input.doorWidthMm}x${input.doorHeightMm}`
   const sizeAlreadyIncluded = doorName.replace(/\s/g, '').includes(doorSize)
   const thresholdAlreadyMentioned = /порог/i.test(doorName)
+  const mountingAlreadyMentioned = /с\s+монтажом/i.test(doorName)
   const thresholdLabel = input.doorHasThreshold ? 'с порогом' : 'без порога'
 
   const typeLabel = doorTypeLabels[input.doorType ?? 'single']
@@ -305,6 +333,9 @@ export function getDoorDescription(
   if (!thresholdAlreadyMentioned) {
     result = `${result} ${thresholdLabel}`
   }
+  if (input.doorMountingPrice > 0 && !mountingAlreadyMentioned) {
+    result = `${result} (с монтажом)`
+  }
 
   return result
 }
@@ -313,7 +344,7 @@ export function getDoorDescription(
 export function getChamberTitle(input: ChamberInput): string {
   const longSideMm = Math.max(input.lengthMm, input.widthMm)
   const shortSideMm = Math.min(input.lengthMm, input.widthMm)
-  return input.title.trim() || `Камера ${longSideMm}×${shortSideMm}×${input.heightMm}`
+  return input.title.trim() || `Холодильная камера ${longSideMm}×${shortSideMm}×${input.heightMm}`
 }
 
 export function getEquipmentOnlyTitle(input: EquipmentOnlyItem): string {
@@ -321,7 +352,10 @@ export function getEquipmentOnlyTitle(input: EquipmentOnlyItem): string {
 }
 
 function equipmentMountingRowName(title: string): string {
-  return `Монтаж и расходники (${title})`
+  const trimmedTitle = title.trim()
+  return trimmedTitle
+    ? `Монтаж холодильного оборудования (${trimmedTitle})`
+    : 'Монтаж холодильного оборудования'
 }
 
 function buildEquipmentRows(
@@ -349,13 +383,87 @@ function buildEquipmentRows(
     rows.push({
       id: `${idPrefix}-equipment-mounting`,
       name: equipmentMountingRowName(title),
-      unit: 'компл.',
+      unit: 'шт.',
       amountPerChamber: 1,
       amountTotal: quantity,
       unitPrice: money(mountingPrice),
       sum: money(mountingPrice * quantity),
       note: 'Отдельно от стоимости оборудования'
     })
+  }
+
+  return rows
+}
+
+function quantityLabel(quantity: number): string {
+  return quantity > 1 ? ` · ${quantity} шт` : ''
+}
+
+function getDoorSummaryDescription(input: ChamberInput): string {
+  const doorDescription = getDoorDescription(input)
+  return /с\s+монтажом/i.test(doorDescription) ? doorDescription : `${doorDescription} (с монтажом)`
+}
+
+function buildEquipmentSummaryRows(
+  idPrefix: string,
+  title: string,
+  quantity: number,
+  equipmentPrice: number,
+  mountingPrice: number
+): CostRow[] {
+  const safeQuantity = Math.max(1, Math.round(quantity))
+
+  return [
+    {
+      id: `${idPrefix}-equipment`,
+      name: `${title}${quantityLabel(safeQuantity)}`,
+      amount: money(equipmentPrice * safeQuantity),
+      kind: 'equipment'
+    },
+    {
+      id: `${idPrefix}-equipment-mounting`,
+      name: 'Монтаж холодильного оборудования',
+      amount: money(mountingPrice * safeQuantity),
+      kind: 'equipment'
+    }
+  ]
+}
+
+function buildChamberSummaryRows(chamber: ProposalChamber): CostRow[] {
+  const quantity = Math.max(1, Math.round(chamber.input.quantity))
+  const chamberMaterialsCost = money(chamber.result.panelCost + chamber.result.accessoryCost)
+  const doorLineSum = money(chamber.result.doorCost + chamber.result.doorMountingCost)
+  const rows: CostRow[] = [
+    {
+      id: `chamber-${chamber.input.id}-materials`,
+      name: `${chamber.result.chamberSummary}${quantityLabel(quantity)}`,
+      amount: chamberMaterialsCost,
+      kind: 'chamber'
+    },
+    {
+      id: `chamber-${chamber.input.id}-mounting`,
+      name: 'Монтаж холодильной камеры',
+      amount: chamber.result.chamberMountingCost,
+      kind: 'chamber'
+    },
+    {
+      id: `chamber-${chamber.input.id}-door`,
+      name: `${getDoorSummaryDescription(chamber.input)}${quantityLabel(quantity)}`,
+      amount: doorLineSum,
+      kind: 'chamber'
+    }
+  ]
+
+  if (chamber.input.equipmentEnabled) {
+    rows.push(
+      ...buildEquipmentSummaryRows(
+        `chamber-${chamber.input.id}`,
+        chamber.input.equipmentName.trim() || 'Холодильное оборудование',
+        quantity,
+        chamber.input.equipmentPrice,
+        chamber.input.equipmentMountingPrice
+      )
+    )
   }
 
   return rows
@@ -387,20 +495,30 @@ export function calculateChamber(input: ChamberInput, pricing: CalculationPricin
 
   // --- Whole sold panels, grouped by type-size (priced by 1190 working width) ---
   // Walls: long walls cover the full outside length; short end walls sit between them.
-  const longWallPanels = panelsAcross(longWallSpanMm)
-  const shortWallPanels = panelsAcross(shortWallSpanMm)
-  const wallPanelCount = 2 * longWallPanels + 2 * shortWallPanels
+  // Their cut pieces have the same panel length, so they can share stock panels.
+  const wallPanelOptimization = optimizeWallPanels(
+    longWallSpanMm,
+    shortWallSpanMm,
+    PANEL_WORKING_WIDTH_MM,
+    input.panelCutKerfMm
+  )
+  const automaticWallPanelCount = wallPanelOptimization.automaticPanelCount
+  const wallPanelCount = resolvePanelCount(automaticWallPanelCount, input.manualWallPanelCount)
 
   // Ceiling: strips along the narrow side, count covers the long side.
   const ceilingStripCount = panelsAcross(longSideMm)
   const ceilingRemainderMm = longSideMm - (ceilingStripCount - 1) * PANEL_WORKING_WIDTH_MM
   const ceilingPanelLenMm = shortSideMm
-  const ceilingPanelCount = ceilingStripCount
+  const automaticCeilingPanelCount = ceilingStripCount
+  const ceilingPanelCount = resolvePanelCount(automaticCeilingPanelCount, input.manualCeilingPanelCount)
 
   // Floor panels are laid after the walls, between them. Both plan dimensions
   // are therefore the inner clear size: outer size minus two panel thicknesses.
   const floorPanelLenMm = innerShortSideMm
-  const floorPanelCount = input.hasPanelFloor ? panelsAcross(innerLongSideMm) : 0
+  const automaticFloorPanelCount = input.hasPanelFloor ? panelsAcross(innerLongSideMm) : 0
+  const floorPanelCount = input.hasPanelFloor
+    ? resolvePanelCount(automaticFloorPanelCount, input.manualFloorPanelCount)
+    : 0
 
   const wallAreaPerChamber = wallPanelCount * workingWidthM * mmToM(wallPanelLenMm)
   const ceilingAreaPerChamber = ceilingPanelCount * workingWidthM * mmToM(ceilingPanelLenMm)
@@ -419,6 +537,11 @@ export function calculateChamber(input: ChamberInput, pricing: CalculationPricin
       panelLengthMm: wallPanelLenMm,
       countPerChamber: wallPanelCount,
       countTotal: wallPanelCount * quantity,
+      automaticCountPerChamber: automaticWallPanelCount,
+      manualCountPerChamber: normalizeManualPanelCount(input.manualWallPanelCount),
+      isManualOverride: normalizeManualPanelCount(input.manualWallPanelCount) !== null,
+      cutPanelCount: wallPanelOptimization.cutPanelCount,
+      cutPlan: wallPanelOptimization.cutPlans.map((plan) => plan.label),
       areaPerChamberM2: round2(wallAreaPerChamber),
       areaTotalM2: round2(wallAreaPerChamber * quantity)
     },
@@ -430,6 +553,11 @@ export function calculateChamber(input: ChamberInput, pricing: CalculationPricin
       panelLengthMm: ceilingPanelLenMm,
       countPerChamber: ceilingPanelCount,
       countTotal: ceilingPanelCount * quantity,
+      automaticCountPerChamber: automaticCeilingPanelCount,
+      manualCountPerChamber: normalizeManualPanelCount(input.manualCeilingPanelCount),
+      isManualOverride: normalizeManualPanelCount(input.manualCeilingPanelCount) !== null,
+      cutPanelCount: 0,
+      cutPlan: [],
       areaPerChamberM2: round2(ceilingAreaPerChamber),
       areaTotalM2: round2(ceilingAreaPerChamber * quantity)
     }
@@ -444,6 +572,11 @@ export function calculateChamber(input: ChamberInput, pricing: CalculationPricin
       panelLengthMm: floorPanelLenMm,
       countPerChamber: floorPanelCount,
       countTotal: floorPanelCount * quantity,
+      automaticCountPerChamber: automaticFloorPanelCount,
+      manualCountPerChamber: normalizeManualPanelCount(input.manualFloorPanelCount),
+      isManualOverride: normalizeManualPanelCount(input.manualFloorPanelCount) !== null,
+      cutPanelCount: 0,
+      cutPlan: [],
       areaPerChamberM2: round2(floorAreaPerChamber),
       areaTotalM2: round2(floorAreaPerChamber * quantity)
     })
@@ -467,7 +600,7 @@ export function calculateChamber(input: ChamberInput, pricing: CalculationPricin
   const sealantUnits = Math.ceil(panelAreaExactM2 * pricing.sealantNormPerM2)
   const screwsUnits = Math.ceil(panelAreaExactM2 * pricing.screwsNormPerM2)
 
-  const chamberSummary = `Камера холодильная ${longSideMm}x${shortSideMm}x${input.heightMm} ${
+  const chamberSummary = `Холодильная камера ${longSideMm}x${shortSideMm}x${input.heightMm} ${
     input.hasPanelFloor ? 'с полом' : 'без пола'
   } (${panelFillingLabel} ${thicknessMm})`
 
@@ -526,6 +659,10 @@ export function calculateChamber(input: ChamberInput, pricing: CalculationPricin
 
   const panelRow = (group: PanelGroup, sum: number): MaterialRow => {
     const notePrefix = group.kind === 'floor' ? 'пол между стенами; ' : group.kind === 'ceiling' ? 'потолок на стенах; ' : ''
+    const countNote = group.isManualOverride
+      ? `${group.countPerChamber} шт вручную (автоматически ${group.automaticCountPerChamber} шт)`
+      : `${group.countPerChamber} шт автоматически`
+    const cutNote = group.cutPlan.length > 0 ? ` · раскрой: ${group.cutPlan.join('; ')}` : ''
 
     return {
       id: group.id,
@@ -535,7 +672,7 @@ export function calculateChamber(input: ChamberInput, pricing: CalculationPricin
       amountTotal: group.areaTotalM2,
       unitPrice: panelPrice,
       sum,
-      note: `${notePrefix}${group.countPerChamber} шт по ${group.panelLengthMm} мм на камеру`
+      note: `${notePrefix}${countNote} по ${group.panelLengthMm} мм на холодильную камеру${cutNote}`
     }
   }
 
@@ -651,7 +788,7 @@ export function calculateChamber(input: ChamberInput, pricing: CalculationPricin
   if (chamberMountingCost > 0) {
     materialRows.push({
       id: 'chamber-mounting',
-      name: 'Монтаж камеры',
+      name: 'Монтаж холодильной камеры',
       unit: 'м²',
       amountPerChamber: round2(wallAreaM2 + floorAreaM2 + ceilingAreaM2),
       amountTotal: round2((wallAreaM2 + floorAreaM2 + ceilingAreaM2) * quantity),
@@ -669,7 +806,7 @@ export function calculateChamber(input: ChamberInput, pricing: CalculationPricin
     amountTotal: quantity,
     unitPrice: money(input.doorPrice + input.doorMountingPrice),
     sum: money((input.doorPrice + input.doorMountingPrice) * quantity),
-    note: input.doorMountingPrice > 0 ? 'Дверь с монтажом' : 'Дверь'
+    note: 'Дверь'
   })
 
   if (input.equipmentEnabled) {
@@ -697,7 +834,7 @@ export function calculateChamber(input: ChamberInput, pricing: CalculationPricin
       amountTotal: quantity,
       unitPrice: money(chamberLineSum / quantity),
       sum: chamberLineSum,
-      note: 'Панели, профили, расходники и монтаж камеры'
+      note: `Панели: стены ${wallPanelCount} шт, потолок ${ceilingPanelCount} шт${input.hasPanelFloor ? `, пол ${floorPanelCount} шт` : ''}; профили, расходники и монтаж холодильной камеры`
     },
     {
       id: 'compact-door',
@@ -707,7 +844,7 @@ export function calculateChamber(input: ChamberInput, pricing: CalculationPricin
       amountTotal: quantity,
       unitPrice: money(doorLineSum / quantity),
       sum: doorLineSum,
-      note: 'Дверь с монтажом, проём из стен не вычитается'
+      note: input.doorMountingPrice > 0 ? 'Проём из стен не вычитается' : 'Дверь, проём из стен не вычитается'
     }
   ]
 
@@ -731,6 +868,7 @@ export function calculateChamber(input: ChamberInput, pricing: CalculationPricin
     panelAreaExactM2: round2(panelAreaExactM2),
     panelAreaSoldM2: round2(panelAreaSoldM2),
     panelGroups,
+    wallPanelOptimization,
     wallPanelCount,
     ceilingPanelCount,
     floorPanelCount,
@@ -790,16 +928,15 @@ export function calculateProposal(
 
   if (proposalSubject === 'equipment-only') {
     const computedEquipment = equipmentOnlyItems.map(calculateEquipmentOnlyItem)
-    const summaryRows: CostRow[] = computedEquipment.map((item, index) => {
-      const quantity = Math.max(1, Math.round(item.input.quantity))
-      const qtyLabel = quantity > 1 ? ` · ${quantity} шт` : ''
-      return {
-        id: `equipment-${item.input.id}`,
-        name: `${index + 1}. ${item.title}${qtyLabel}`,
-        amount: item.subtotal,
-        kind: 'equipment'
-      }
-    })
+    const summaryRows: CostRow[] = computedEquipment.flatMap((item) =>
+      buildEquipmentSummaryRows(
+        `equipment-${item.input.id}`,
+        item.title,
+        item.input.quantity,
+        item.input.price,
+        item.input.mountingPrice
+      )
+    )
     const equipmentSubtotal = money(computedEquipment.reduce((acc, item) => acc + item.subtotal, 0))
     const subtotal = money(equipmentSubtotal + extraRowsTotal)
     const vatAmount = options.vatEnabled ? money((subtotal * options.vatRatePercent) / 100) : 0
@@ -849,16 +986,7 @@ export function calculateProposal(
     result: calculateChamber(input, pricing)
   }))
 
-  const summaryRows: CostRow[] = computed.map((chamber, index) => {
-    const quantity = Math.max(1, Math.round(chamber.input.quantity))
-    const qtyLabel = quantity > 1 ? ` · ${quantity} шт` : ''
-    return {
-      id: `chamber-${chamber.input.id}`,
-      name: `${index + 1}. ${chamber.title}${qtyLabel}`,
-      amount: chamber.result.chamberSubtotal,
-      kind: 'chamber'
-    }
-  })
+  const summaryRows: CostRow[] = computed.flatMap(buildChamberSummaryRows)
 
   const chambersSubtotal = money(computed.reduce((acc, chamber) => acc + chamber.result.chamberSubtotal, 0))
 
@@ -932,6 +1060,10 @@ export const defaultChamberInput: ChamberInput = {
   widthMm: 6000,
   heightMm: 2500,
   quantity: 1,
+  manualWallPanelCount: null,
+  manualCeilingPanelCount: null,
+  manualFloorPanelCount: null,
+  panelCutKerfMm: 0,
   thicknessMm: 100,
   panelFilling: 'PIR',
   customPanelFilling: '',
@@ -953,6 +1085,7 @@ export const defaultChamberInput: ChamberInput = {
   equipmentMountingPrice: 0,
   equipmentImageName: '',
   equipmentImageSizePercent: 100,
+  equipmentCharacteristics: '',
   panelPricePerM2: 2768.48,
   mountingWallPricePerM2: 0,
   mountingFloorPricePerM2: 0,
@@ -966,7 +1099,8 @@ export const defaultEquipmentOnlyItem: EquipmentOnlyItem = {
   price: 0,
   mountingPrice: 0,
   imageName: '',
-  imageSizePercent: 100
+  imageSizePercent: 100,
+  characteristics: ''
 }
 
 export const defaultProposalOptions: ProposalOptions = {

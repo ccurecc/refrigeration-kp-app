@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from 'react'
 import { Copy, FolderOpen, ImagePlus, Move, Plus, Printer, Save, Settings, Snowflake, Trash2, Wand2, X } from 'lucide-react'
 import {
   calculateProposal,
@@ -210,8 +210,20 @@ function restoreChamber(chamber: RestorableChamber, createNewId = false): Chambe
     EQUIPMENT_IMAGE_SIZE_MIN,
     EQUIPMENT_IMAGE_SIZE_MAX
   )
+  restored.manualWallPanelCount = restoreOptionalPanelCount(currentChamber.manualWallPanelCount)
+  restored.manualCeilingPanelCount = restoreOptionalPanelCount(currentChamber.manualCeilingPanelCount)
+  restored.manualFloorPanelCount = restoreOptionalPanelCount(currentChamber.manualFloorPanelCount)
+  restored.panelCutKerfMm = restoreNonNegativeNumber(currentChamber.panelCutKerfMm, 0)
 
   return normalizeChamberDoor(createNewId ? createChamber(restored) : restored)
+}
+
+function restoreNonNegativeNumber(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : fallback
+}
+
+function restoreOptionalPanelCount(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 1 ? Math.max(1, Math.round(value)) : null
 }
 
 function restoreEquipmentOnlyItem(item: Partial<EquipmentOnlyItem>): EquipmentOnlyItem {
@@ -264,6 +276,10 @@ export function App(): JSX.Element {
     : options.proposalMode === 'compact'
       ? activeResult?.compactRows ?? []
       : activeResult?.materialRows ?? []
+  const activeWallGroup = activeResult?.panelGroups.find((group) => group.kind === 'wall')
+  const activeCeilingGroup = activeResult?.panelGroups.find((group) => group.kind === 'ceiling')
+  const activeFloorGroup = activeResult?.panelGroups.find((group) => group.kind === 'floor')
+  const wallPanelSaving = activeResult?.wallPanelOptimization.savingAgainstIndependentCount ?? 0
   const activeChamberEquipmentImage = equipmentImages[activeChamber.id]
   const activeEquipmentOnlyImage = equipmentImages[activeEquipmentOnlyItem.id]
 
@@ -273,6 +289,29 @@ export function App(): JSX.Element {
         chamber.id === activeId ? normalizeChamberDoor({ ...chamber, [key]: value }) : chamber
       )
     )
+  }
+
+  const updatePanelOverride = (
+    key: 'manualWallPanelCount' | 'manualCeilingPanelCount' | 'manualFloorPanelCount',
+    value: number
+  ): void => {
+    updateActive(key, Math.max(1, Math.round(value)))
+  }
+
+  const resetPanelOverrides = (): void => {
+    setChambers((current) =>
+      current.map((chamber) =>
+        chamber.id === activeId
+          ? {
+              ...chamber,
+              manualWallPanelCount: null,
+              manualCeilingPanelCount: null,
+              manualFloorPanelCount: null
+            }
+          : chamber
+      )
+    )
+    setStatusMessage('Количество панелей возвращено к автоматическому расчёту')
   }
 
   const updateActiveEquipmentOnly = <K extends keyof EquipmentOnlyItem>(key: K, value: EquipmentOnlyItem[K]): void => {
@@ -288,7 +327,9 @@ export function App(): JSX.Element {
   const updateProposalSubject = (proposalSubject: ProposalSubject): void => {
     setOptions((current) => ({ ...current, proposalSubject }))
     setStatusMessage(
-      proposalSubject === 'equipment-only' ? 'Режим КП: только холодильное оборудование' : 'Режим КП: камера + оборудование'
+      proposalSubject === 'equipment-only'
+        ? 'Режим КП: только холодильное оборудование'
+        : 'Режим КП: холодильная камера + оборудование'
     )
     if (proposalSubject === 'equipment-only' && equipmentOnlyItems.length === 0) {
       const fresh = createEquipmentOnlyItem()
@@ -322,7 +363,7 @@ export function App(): JSX.Element {
     const fresh = createChamber()
     setChambers((current) => [...current, fresh])
     setActiveId(fresh.id)
-    setStatusMessage('Добавлена новая камера')
+    setStatusMessage('Добавлена новая холодильная камера')
   }
 
   const duplicateChamber = (id: string): void => {
@@ -518,23 +559,36 @@ export function App(): JSX.Element {
     }
   }
 
-  const handleEquipmentImageChange = (fileList: FileList | null): void => {
-    const file = fileList?.[0]
+  const clearActiveEquipmentImage = (): void => {
     const imageOwnerId = isEquipmentOnlyProposal ? activeEquipmentOnlyItem.id : activeChamber.id
 
     if (isEquipmentOnlyProposal) {
-      updateActiveEquipmentOnly('imageName', file?.name ?? '')
+      updateActiveEquipmentOnly('imageName', '')
     } else {
-      updateActive('equipmentImageName', file?.name ?? '')
+      updateActive('equipmentImageName', '')
     }
 
+    setEquipmentImages((current) => {
+      const next = { ...current }
+      delete next[imageOwnerId]
+      return next
+    })
+  }
+
+  const handleEquipmentImageChange = (event: ChangeEvent<HTMLInputElement>): void => {
+    const input = event.currentTarget
+    const file = input.files?.[0]
+    const imageOwnerId = isEquipmentOnlyProposal ? activeEquipmentOnlyItem.id : activeChamber.id
+    input.value = ''
+
     if (!file) {
-      setEquipmentImages((current) => {
-        const next = { ...current }
-        delete next[imageOwnerId]
-        return next
-      })
       return
+    }
+
+    if (isEquipmentOnlyProposal) {
+      updateActiveEquipmentOnly('imageName', file.name)
+    } else {
+      updateActive('equipmentImageName', file.name)
     }
 
     const reader = new FileReader()
@@ -558,7 +612,7 @@ export function App(): JSX.Element {
       const saveResult = await window.fwApp.saveCalculation({
         defaultName: defaultFileName(chambers, equipmentOnlyItems, proposal, options.proposalSubject),
         data: {
-          version: 10,
+          version: 12,
           savedAt: new Date().toISOString(),
           proposal,
           company,
@@ -666,7 +720,7 @@ export function App(): JSX.Element {
       return
     }
     if (isEquipmentOnlyProposal) {
-      setStatusMessage('Печать видов доступна только для КП с камерами')
+      setStatusMessage('Печать видов доступна только для КП с холодильными камерами')
       return
     }
 
@@ -812,7 +866,7 @@ export function App(): JSX.Element {
                 type="button"
                 onClick={() => updateProposalSubject('chambers')}
               >
-                Камера + оборудование
+                Холодильная камера + оборудование
               </button>
               <button
                 className={options.proposalSubject === 'equipment-only' ? 'active' : ''}
@@ -823,7 +877,7 @@ export function App(): JSX.Element {
               </button>
             </div>
             <p className="hint-text">
-              В режиме «Только оборудование» расчёт камеры, панелей, дверей и видов сверху не используется.
+              В режиме «Только оборудование» расчёт холодильной камеры, панелей, дверей и видов сверху не используется.
             </p>
           </FormCard>
 
@@ -911,7 +965,7 @@ export function App(): JSX.Element {
                     <label className="file-button">
                       <ImagePlus size={15} />
                       {activeEquipmentOnlyImage ? 'Заменить фото' : 'Выбрать фото'}
-                      <input type="file" accept="image/*" onChange={(event) => handleEquipmentImageChange(event.target.files)} />
+                      <input type="file" accept="image/*" onChange={handleEquipmentImageChange} />
                     </label>
                     {activeEquipmentOnlyItem.imageName ? (
                       <span className="file-name" title={activeEquipmentOnlyItem.imageName}>
@@ -921,7 +975,7 @@ export function App(): JSX.Element {
                       <span className="file-name muted">Файл не выбран</span>
                     )}
                     {activeEquipmentOnlyImage ? (
-                      <button className="icon-button" type="button" aria-label="Убрать фото" onClick={() => handleEquipmentImageChange(null)}>
+                      <button className="icon-button" type="button" aria-label="Убрать фото" onClick={clearActiveEquipmentImage}>
                         <Trash2 size={15} />
                       </button>
                     ) : null}
@@ -943,11 +997,19 @@ export function App(): JSX.Element {
                     <output>{activeEquipmentOnlyItem.imageSizePercent}%</output>
                   </label>
                 </div>
+                <label>
+                  Характеристики холодильного оборудования
+                  <textarea
+                    className="equipment-characteristics-input"
+                    value={activeEquipmentOnlyItem.characteristics}
+                    onChange={(event) => updateActiveEquipmentOnly('characteristics', event.target.value)}
+                  />
+                </label>
               </FormCard>
             </>
           ) : (
             <>
-              <div className="chamber-tabs" role="tablist" aria-label="Камеры в КП">
+              <div className="chamber-tabs" role="tablist" aria-label="Холодильные камеры в КП">
                 {chambers.map((chamber, index) => (
                   <button
                     key={chamber.id}
@@ -964,7 +1026,7 @@ export function App(): JSX.Element {
                       <span
                         className="chamber-tab-close"
                         role="button"
-                        aria-label="Удалить камеру"
+                        aria-label="Удалить холодильную камеру"
                         onClick={(event) => {
                           event.stopPropagation()
                           removeChamber(chamber.id)
@@ -975,13 +1037,18 @@ export function App(): JSX.Element {
                     ) : null}
                   </button>
                 ))}
-                <button type="button" className="chamber-tab add" onClick={addChamber} title="Добавить камеру">
-                  <Plus size={15} /> Камера
+                <button
+                  type="button"
+                  className="chamber-tab add"
+                  onClick={addChamber}
+                  title="Добавить холодильную камеру"
+                >
+                  <Plus size={15} /> Холодильная камера
                 </button>
               </div>
 
               <FormCard
-                title="Камера"
+                title="Холодильная камера"
                 action={
                   <button className="link-button" type="button" onClick={() => duplicateChamber(activeId)}>
                     <Copy size={14} /> Дублировать
@@ -989,7 +1056,7 @@ export function App(): JSX.Element {
                 }
               >
                 <label>
-                  Название камеры (необязательно)
+                  Название холодильной камеры (необязательно)
                   <input
                     value={activeChamber.title}
                     placeholder={getChamberTitle(activeChamber)}
@@ -1066,7 +1133,14 @@ export function App(): JSX.Element {
                 </div>
               </FormCard>
 
-              <FormCard title="Панели">
+              <FormCard
+                title="Панели"
+                action={
+                  <button className="link-button" type="button" onClick={resetPanelOverrides}>
+                    Сбросить количества
+                  </button>
+                }
+              >
                 <div className="field-grid two-columns">
                   <label>
                     Толщина панели
@@ -1108,6 +1182,119 @@ export function App(): JSX.Element {
                   Цена панели, руб/м²
                   {numberInput(activeChamber.panelPricePerM2, (value) => updateActive('panelPricePerM2', value))}
                 </label>
+                <label>
+                  Запас на пропил, мм
+                  {numberInput(activeChamber.panelCutKerfMm, (value) => updateActive('panelCutKerfMm', value), 0)}
+                </label>
+              <p className="hint-text">
+                Остатки стен автоматически объединяются в общий раскрой. Нулевой запас позволяет использовать листы
+                вплотную; при реальном распиле укажите технологический запас.
+              </p>
+              {wallPanelSaving > 0 ? (
+                <p className="panel-saving-note">
+                  Экономия за счёт общего раскроя стен: {wallPanelSaving} шт.
+                </p>
+              ) : null}
+              <div className="panel-counts">
+                <div className="panel-counts-head">
+                  <span>Группа панелей</span>
+                  <span>Авто</span>
+                  <span>Количество к продаже</span>
+                  <span>Всего</span>
+                </div>
+                {activeWallGroup ? (
+                  <div className="panel-count-row">
+                    <span>
+                      Стены
+                      {activeWallGroup.cutPlan.length > 0 ? (
+                        <small>Раскрой: {activeWallGroup.cutPlan.join('; ')}</small>
+                      ) : null}
+                    </span>
+                    <strong>{activeWallGroup.automaticCountPerChamber}</strong>
+                    <div className="panel-count-editor">
+                      {numberInput(
+                        activeWallGroup.countPerChamber,
+                        (value) => updatePanelOverride('manualWallPanelCount', value),
+                        1
+                      )}
+                      {activeWallGroup.isManualOverride ? (
+                        <button
+                          className="panel-count-reset"
+                          type="button"
+                          onClick={() => updateActive('manualWallPanelCount', null)}
+                          title="Вернуть автоматическое количество"
+                        >
+                          Авто
+                        </button>
+                      ) : null}
+                    </div>
+                    <span>{activeWallGroup.countTotal}</span>
+                  </div>
+                ) : null}
+                {activeCeilingGroup ? (
+                  <div className="panel-count-row">
+                    <span>Потолок</span>
+                    <strong>{activeCeilingGroup.automaticCountPerChamber}</strong>
+                    <div className="panel-count-editor">
+                      {numberInput(
+                        activeCeilingGroup.countPerChamber,
+                        (value) => updatePanelOverride('manualCeilingPanelCount', value),
+                        1
+                      )}
+                      {activeCeilingGroup.isManualOverride ? (
+                        <button
+                          className="panel-count-reset"
+                          type="button"
+                          onClick={() => updateActive('manualCeilingPanelCount', null)}
+                          title="Вернуть автоматическое количество"
+                        >
+                          Авто
+                        </button>
+                      ) : null}
+                    </div>
+                    <span>{activeCeilingGroup.countTotal}</span>
+                  </div>
+                ) : null}
+                {activeChamber.hasPanelFloor && activeFloorGroup ? (
+                  <div className="panel-count-row">
+                    <span>Пол</span>
+                    <strong>{activeFloorGroup.automaticCountPerChamber}</strong>
+                    <div className="panel-count-editor">
+                      {numberInput(
+                        activeFloorGroup.countPerChamber,
+                        (value) => updatePanelOverride('manualFloorPanelCount', value),
+                        1
+                      )}
+                      {activeFloorGroup.isManualOverride ? (
+                        <button
+                          className="panel-count-reset"
+                          type="button"
+                          onClick={() => updateActive('manualFloorPanelCount', null)}
+                          title="Вернуть автоматическое количество"
+                        >
+                          Авто
+                        </button>
+                      ) : null}
+                    </div>
+                    <span>{activeFloorGroup.countTotal}</span>
+                  </div>
+                ) : null}
+              </div>
+              {activeWallGroup?.isManualOverride && activeWallGroup.countPerChamber < activeWallGroup.automaticCountPerChamber ? (
+                <p className="panel-count-warning" role="alert">
+                  Введено меньше стеновых панелей, чем рассчитано автоматически. Проверьте раскрой перед заказом.
+                </p>
+              ) : null}
+              {activeCeilingGroup?.isManualOverride && activeCeilingGroup.countPerChamber < activeCeilingGroup.automaticCountPerChamber ? (
+                <p className="panel-count-warning" role="alert">
+                  Введено меньше потолочных панелей, чем рассчитано автоматически. Проверьте раскрой перед заказом.
+                </p>
+              ) : null}
+              {activeFloorGroup?.isManualOverride && activeFloorGroup.countPerChamber < activeFloorGroup.automaticCountPerChamber ? (
+                <p className="panel-count-warning" role="alert">
+                  Введено меньше панелей пола, чем рассчитано автоматически. Проверьте раскрой перед заказом.
+                </p>
+              ) : null}
               </FormCard>
 
               <FormCard
@@ -1201,7 +1388,7 @@ export function App(): JSX.Element {
                 </div>
               </FormCard>
 
-              <FormCard title="Монтаж камеры">
+              <FormCard title="Монтаж холодильной камеры">
                 <div className="field-grid three-columns">
                   <label>
                     Стены, руб/м²
@@ -1243,7 +1430,7 @@ export function App(): JSX.Element {
                     checked={activeChamber.equipmentEnabled}
                     onChange={(event) => updateActive('equipmentEnabled', event.target.checked)}
                   />
-                  Продаётся вместе с камерой
+                  Продаётся вместе с холодильной камерой
                 </label>
                 <label>
                   Название/модель
@@ -1273,7 +1460,7 @@ export function App(): JSX.Element {
                         disabled={!activeChamber.equipmentEnabled}
                         type="file"
                         accept="image/*"
-                        onChange={(event) => handleEquipmentImageChange(event.target.files)}
+                        onChange={handleEquipmentImageChange}
                       />
                     </label>
                     {activeChamber.equipmentImageName ? (
@@ -1284,7 +1471,7 @@ export function App(): JSX.Element {
                       <span className="file-name muted">Файл не выбран</span>
                     )}
                     {activeChamberEquipmentImage ? (
-                      <button className="icon-button" type="button" aria-label="Убрать фото" onClick={() => handleEquipmentImageChange(null)}>
+                      <button className="icon-button" type="button" aria-label="Убрать фото" onClick={clearActiveEquipmentImage}>
                         <Trash2 size={15} />
                       </button>
                     ) : null}
@@ -1306,6 +1493,15 @@ export function App(): JSX.Element {
                     <output>{activeChamber.equipmentImageSizePercent}%</output>
                   </label>
                 </div>
+                <label>
+                  Характеристики холодильного оборудования
+                  <textarea
+                    className="equipment-characteristics-input"
+                    disabled={!activeChamber.equipmentEnabled}
+                    value={activeChamber.equipmentCharacteristics}
+                    onChange={(event) => updateActive('equipmentCharacteristics', event.target.value)}
+                  />
+                </label>
               </FormCard>
             </>
           )}
@@ -1409,7 +1605,7 @@ export function App(): JSX.Element {
                     <p className="result-placeholder">Фото позиции будет показано здесь и попадёт в PDF после загрузки изображения.</p>
                   )}
                   <div className="equipment-only-summary">
-                    <strong>Оборудование без камеры</strong>
+                    <strong>Оборудование без холодильной камеры</strong>
                     <span>
                       Цена оборудования: {formatMoney(activeEquipmentOnlyItem.price)} · монтаж и расходники:{' '}
                       {formatMoney(activeEquipmentOnlyItem.mountingPrice)}
@@ -1473,7 +1669,7 @@ export function App(): JSX.Element {
                     <strong>{formatNumber(activeResult!.panelAreaSoldM2)} м²</strong>
                   </div>
                   <div className="total-chip">
-                    <span>Камера</span>
+                    <span>Холодильная камера</span>
                     <strong>{formatMoney(activeResult!.panelCost)}</strong>
                   </div>
                   <div className="total-chip">
@@ -1485,7 +1681,7 @@ export function App(): JSX.Element {
                     <strong>{formatMoney(activeResult!.doorCost + activeResult!.doorMountingCost)}</strong>
                   </div>
                   <div className="total-chip">
-                    <span>Итого по камере</span>
+                    <span>Итого по холодильной камере</span>
                     <strong>{formatMoney(activeResult!.chamberSubtotal)}</strong>
                   </div>
                   <div className="total-chip accent">
@@ -1519,7 +1715,7 @@ export function App(): JSX.Element {
                     <tr>
                       <th>Позиция</th>
                       <th>Ед.</th>
-                      <th>{isEquipmentOnlyProposal ? 'На ед.' : 'На камеру'}</th>
+                      <th>{isEquipmentOnlyProposal ? 'На ед.' : 'На холодильную камеру'}</th>
                       <th>Всего</th>
                       <th>Цена</th>
                       <th>Сумма</th>
@@ -1547,13 +1743,7 @@ export function App(): JSX.Element {
             <div className="result-card">
               <div className="card-heading">
                 <h3>
-                  {isEquipmentOnlyProposal
-                    ? proposalResult.equipmentItems.length > 1
-                      ? 'Сводная смета по КП'
-                      : 'Смета по оборудованию'
-                    : chambers.length > 1
-                      ? 'Сводная смета по КП'
-                      : 'Смета'}
+                  Сводная смета
                 </h3>
                 <span>{options.vatEnabled ? `НДС ${options.vatRatePercent}%` : 'без НДС'}</span>
               </div>

@@ -424,7 +424,7 @@ export function buildSide3dSvg(input: ChamberInput, result: ChamberResult): stri
     : ''
 
   return `
-    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="3D-вид камеры с размерами">
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="3D-вид холодильной камеры с размерами">
       <defs>
         <marker id="dim-arrow" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto-start-reverse">
           <path d="M0,0 L8,4 L0,8 Z" fill="#163246" />

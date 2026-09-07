@@ -398,6 +398,19 @@ input:disabled {
   resize: vertical;
 }
 
+.equipment-characteristics-input {
+  min-height: 160px;
+  padding: 10px 11px;
+  font-size: 13px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.equipment-characteristics-input:disabled {
+  background: #f2f4f6;
+  color: #9aa3ad;
+}
+
 .inline-fields {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -583,6 +596,120 @@ input:disabled {
 .optimizer-button-note {
   color: var(--muted);
   font-size: 11px;
+}
+
+/* ---------- Panel quantity overrides ---------- */
+.panel-counts {
+  display: grid;
+  gap: 0;
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.panel-saving-note {
+  margin: 10px 0 0;
+  color: var(--green-dark);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.panel-counts-head,
+.panel-count-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) 42px minmax(0, 1fr) 42px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  min-width: 0;
+}
+
+.panel-counts-head > *,
+.panel-count-row > * {
+  min-width: 0;
+}
+
+.panel-counts-head {
+  background: #f1f5f4;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.panel-count-row {
+  border-top: 1px solid var(--border-soft);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.panel-count-row > span:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.panel-count-row small {
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.3;
+}
+
+.panel-count-row strong,
+.panel-count-row > span:last-child {
+  text-align: center;
+}
+
+.panel-count-editor {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.panel-count-editor input {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+}
+
+.panel-count-reset {
+  padding: 4px 6px;
+  border: 1px solid #b9d0c8;
+  border-radius: 5px;
+  background: #f2f8f5;
+  color: var(--green-dark);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.panel-count-reset:hover {
+  background: #e5f2eb;
+}
+
+.panel-count-warning {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border: 1px solid #e6c49a;
+  border-radius: var(--radius-sm);
+  background: #fff7eb;
+  color: #9c5b1b;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+@media (max-width: 700px) {
+  .panel-counts-head,
+  .panel-count-row {
+    grid-template-columns: minmax(0, 1fr) 38px minmax(0, 1fr) 38px;
+    gap: 5px;
+    padding-inline: 7px;
+  }
+
+  .panel-count-editor {
+    gap: 3px;
+  }
+
 }
 
 /* ---------- File field (equipment photo) ---------- */

@@ -1,6 +1,6 @@
 {
   "name": "refrigeration-kp-app",
-  "version": "0.1.0",
+  "version": "2.0.5",
   "description": "Desktop app for cold room panel calculation and commercial proposal generation.",
   "main": "out/main/index.js",
   "type": "module",
@@ -15,7 +15,7 @@
     "build": "tsc --noEmit && electron-vite build",
     "preview": "electron-vite preview",
     "dist:mac": "pnpm icons && pnpm build && electron-builder --mac",
-    "dist:win": "pnpm icons && pnpm build && electron-builder --win"
+    "dist:win": "pnpm build && electron-builder --win"
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",
@@ -62,7 +62,13 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "perMachine": false
+      "perMachine": false,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "FrozenWest КП",
+      "uninstallDisplayName": "FrozenWest КП ${version}"
     }
   }
 }
