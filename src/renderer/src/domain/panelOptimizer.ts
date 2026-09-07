@@ -88,7 +88,8 @@ function packCuts(piecesMm: number[], stockWidthMm: number, kerfMm: number): Pan
   }
 
   search(0)
-  return (best ?? []).map((bin) => ({
+  const plans: Bin[] = best === null ? [] : best
+  return plans.map((bin) => ({
     piecesMm: bin.piecesMm,
     usedWidthMm: bin.usedWidthMm,
     wasteMm: Math.max(0, stockWidthMm - bin.usedWidthMm),
